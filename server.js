@@ -3,27 +3,8 @@ const cors = require('cors');
 const multer = require('multer');
 const sharp = require('sharp');
 const path = require('path');
-const { v2: cloudinary } = require('cloudinary');
-
-// إعدادات Cloudinary مع الحماية وإزالة المسافات الزائدة
-const CLOUDINARY_CLOUD_NAME = (process.env.CLOUDINARY_CLOUD_NAME || '').trim();
-const CLOUDINARY_API_KEY = (process.env.CLOUDINARY_API_KEY || '').trim();
-const CLOUDINARY_API_SECRET = (process.env.CLOUDINARY_API_SECRET || '').trim();
-
-cloudinary.config({
-  cloud_name: CLOUDINARY_CLOUD_NAME,
-  api_key: CLOUDINARY_API_KEY,
-  api_secret: CLOUDINARY_API_SECRET,
-  secure: true,
-});
-
-console.log('Cloudinary runtime config:', {
-  cloud_name: CLOUDINARY_CLOUD_NAME,
-  api_key_start: CLOUDINARY_API_KEY ? CLOUDINARY_API_KEY.slice(0, 4) : null,
-  api_key_end: CLOUDINARY_API_KEY ? CLOUDINARY_API_KEY.slice(-4) : null,
-  api_secret_exists: !!CLOUDINARY_API_SECRET,
-  api_secret_length: CLOUDINARY_API_SECRET.length,
-});
+const fs = require('fs');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -31,6 +12,13 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// مجلد مؤقت لحفظ نتائج الدمج حتى يتمكن التطبيق من تحميلها وحفظها
+const RESULTS_DIR = path.join('/tmp', 'cookie-typer-results');
+
+if (!fs.existsSync(RESULTS_DIR)) {
+  fs.mkdirSync(RESULTS_DIR, { recursive: true });
+}
 
 // إعداد multer لاستقبال الصور في الذاكرة (Buffer) مع حد أقصى للرفع 50 ميجابايت لكل طلب
 const upload = multer({
@@ -49,34 +37,24 @@ const upload = multer({
   },
 });
 
-app.get('/cloudinary-test', async (req, res) => {
-  try {
-    const result = await cloudinary.uploader.upload(
-      'https://res.cloudinary.com/demo/image/upload/sample.jpg',
-      {
-        folder: 'cookie-typer/test',
-      }
-    );
+// رابط تحميل مؤقت للصورة الناتجة
+app.get('/results/:fileName', (req, res) => {
+  const fileName = path.basename(req.params.fileName);
+  const filePath = path.join(RESULTS_DIR, fileName);
 
-    res.json({
-      success: true,
-      url: result.secure_url,
-      publicId: result.public_id,
-    });
-  } catch (error) {
-    console.error('Cloudinary test error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-      http_code: error.http_code,
-    });
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'الصورة غير موجودة أو انتهت صلاحيتها' });
   }
+
+  res.setHeader('Content-Type', 'image/png');
+  res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+  res.sendFile(filePath);
 });
 
 /**
  * نقطة النهاية: POST /merge
  * تستقبل عدة صور (حقل images) مع خيار unifyWidth (true/false)
- * تعيد رابط صورة PNG مدمجة بأعلى جودة (lossless) بعد رفعها على Cloudinary
+ * تعيد رابط صورة PNG مدمجة بأعلى جودة (lossless) بعد حفظها مؤقتًا على الخادم
  */
 app.post('/merge', upload.array('images', 20), async (req, res) => {
   try {
@@ -161,33 +139,31 @@ app.post('/merge', upload.array('images', 20), async (req, res) => {
       .png({ compressionLevel: 0, palette: false }) // compressionLevel 0 = lossless
       .toBuffer();
 
-    // رفع الصورة الناتجة إلى Cloudinary
-    const cloudinaryResult = await new Promise((resolve, reject) => {
-      const stream = cloudinary.uploader.upload_stream(
-        {
-          folder: 'cookie-typer/merged',
-          resource_type: 'image',
-          format: 'png',
-        },
-        (error, result) => {
-          if (error) {
-            return reject(error);
-          }
-          resolve(result);
-        }
-      );
+    // حفظ الصورة الناتجة مؤقتًا على الخادم
+    const fileName = `merged_${Date.now()}_${crypto.randomBytes(8).toString('hex')}.png`;
+    const filePath = path.join(RESULTS_DIR, fileName);
 
-      stream.end(mergedImage);
-    });
+    fs.writeFileSync(filePath, mergedImage);
+
+    // حذف الصورة المؤقتة بعد 30 دقيقة
+    setTimeout(() => {
+      fs.unlink(filePath, (error) => {
+        if (error && error.code !== 'ENOENT') {
+          console.error('خطأ أثناء حذف الصورة المؤقتة:', error);
+        }
+      });
+    }, 30 * 60 * 1000);
+
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.get('host');
+    const resultUrl = `${protocol}://${host}/results/${fileName}`;
 
     // إرسال رابط الصورة الناتجة
     res.json({
       success: true,
-      url: cloudinaryResult.secure_url,
-      publicId: cloudinaryResult.public_id,
-      width: cloudinaryResult.width,
-      height: cloudinaryResult.height,
-      format: cloudinaryResult.format,
+      url: resultUrl,
+      fileName,
+      expiresInMinutes: 30,
     });
   } catch (error) {
     console.error('خطأ في الدمج:', error);
