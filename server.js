@@ -1,3 +1,23 @@
+const { v2: cloudinary } = require('cloudinary');
+
+const CLOUDINARY_CLOUD_NAME = (process.env.CLOUDINARY_CLOUD_NAME || '').trim();
+const CLOUDINARY_API_KEY = (process.env.CLOUDINARY_API_KEY || '').trim();
+const CLOUDINARY_API_SECRET = (process.env.CLOUDINARY_API_SECRET || '').trim();
+
+cloudinary.config({
+  cloud_name: CLOUDINARY_CLOUD_NAME,
+  api_key: CLOUDINARY_API_KEY,
+  api_secret: CLOUDINARY_API_SECRET,
+  secure: true,
+});
+
+console.log('Cloudinary runtime config:', {
+  cloud_name: CLOUDINARY_CLOUD_NAME,
+  api_key_start: CLOUDINARY_API_KEY ? CLOUDINARY_API_KEY.slice(0, 4) : null,
+  api_key_end: CLOUDINARY_API_KEY ? CLOUDINARY_API_KEY.slice(-4) : null,
+  api_secret_exists: !!CLOUDINARY_API_SECRET,
+  api_secret_length: CLOUDINARY_API_SECRET.length,
+});
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
@@ -33,6 +53,30 @@ const upload = multer({
       cb(new Error('يُسمح فقط بصور PNG و JPEG'), false);
     }
   },
+});
+
+app.get('/cloudinary-test', async (req, res) => {
+  try {
+    const result = await cloudinary.uploader.upload(
+      'https://res.cloudinary.com/demo/image/upload/sample.jpg',
+      {
+        folder: 'cookie-typer/test',
+      }
+    );
+
+    res.json({
+      success: true,
+      url: result.secure_url,
+      publicId: result.public_id,
+    });
+  } catch (error) {
+    console.error('Cloudinary test error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      http_code: error.http_code,
+    });
+  }
 });
 
 /**
