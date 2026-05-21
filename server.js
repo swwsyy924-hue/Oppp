@@ -1,5 +1,11 @@
+const express = require('express');
+const cors = require('cors');
+const multer = require('multer');
+const sharp = require('sharp');
+const path = require('path');
 const { v2: cloudinary } = require('cloudinary');
 
+// إعدادات Cloudinary مع الحماية وإزالة المسافات الزائدة
 const CLOUDINARY_CLOUD_NAME = (process.env.CLOUDINARY_CLOUD_NAME || '').trim();
 const CLOUDINARY_API_KEY = (process.env.CLOUDINARY_API_KEY || '').trim();
 const CLOUDINARY_API_SECRET = (process.env.CLOUDINARY_API_SECRET || '').trim();
@@ -18,21 +24,9 @@ console.log('Cloudinary runtime config:', {
   api_secret_exists: !!CLOUDINARY_API_SECRET,
   api_secret_length: CLOUDINARY_API_SECRET.length,
 });
-const express = require('express');
-const cors = require('cors');
-const multer = require('multer');
-const sharp = require('sharp');
-const path = require('path');
-const { v2: cloudinary } = require('cloudinary');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
 
 // Middleware
 app.use(cors());
@@ -95,7 +89,6 @@ app.post('/merge', upload.array('images', 20), async (req, res) => {
     const unifyWidth = req.body.unifyWidth === 'true';
 
     // --- معالجة الصور باستخدام sharp مع الحفاظ على الجودة الأصلية ---
-    // تحويل كل buffer إلى كائن sharp واستخراج البيانات الوصفية
     const imageMetas = [];
     const sharpInstances = [];
 
@@ -142,7 +135,7 @@ app.post('/merge', upload.array('images', 20), async (req, res) => {
       const meta = imageMetas[i];
       const targetSize = sizes[i];
 
-      // تغيير حجم الصورة إلى الهدف (إذا كان التوحيد أو لم يكن، ولكننا نحتاج تغيير الحجم إذا كان العرض مختلفًا)
+      // تغيير حجم الصورة إلى الهدف
       const resized = sharpInstances[i].resize({
         width: targetSize.width,
         height: targetSize.height,
@@ -165,7 +158,7 @@ app.post('/merge', upload.array('images', 20), async (req, res) => {
     // تنفيذ الدمج
     const mergedImage = await compositeImage
       .composite(compositeOps)
-      .png({ compressionLevel: 0, palette: false }) // compressionLevel 0 = lossless, no compression artifacts
+      .png({ compressionLevel: 0, palette: false }) // compressionLevel 0 = lossless
       .toBuffer();
 
     // رفع الصورة الناتجة إلى Cloudinary
@@ -198,7 +191,7 @@ app.post('/merge', upload.array('images', 20), async (req, res) => {
     });
   } catch (error) {
     console.error('خطأ في الدمج:', error);
-    res.status(500).json({ error: 'فشل معالجة الصور على الخادم' });
+    res.status(500).json({ error: 'Fails' });
   }
 });
 
