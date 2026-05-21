@@ -101,17 +101,14 @@ app.post('/merge', upload.array('images', 20), async (req, res) => {
     });
 
     // إنشاء صورة فارغة بالحجم النهائي (شفافة)
-    let compositeImage = sharp(
-      {
-        create: {
-          width: unifyWidth ? maxWidth : Math.max(...sizes.map(s => s.width)),
-          height: totalHeight,
-          channels: 4,
-          background: { r: 0, g: 0, b: 0, alpha: 0 }, // خلفية شفافة
-        },
+    let compositeImage = sharp({
+      create: {
+        width: unifyWidth ? maxWidth : Math.max(...sizes.map(s => s.width)),
+        height: totalHeight,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 }, // خلفية شفافة
       },
-      SHARP_OPTIONS
-    );
+    });
 
     // تجهيز عمليات الدمج (composite) لجميع الصور
     const compositeOps = [];
