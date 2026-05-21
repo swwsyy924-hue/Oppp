@@ -3,9 +3,16 @@ const cors = require('cors');
 const multer = require('multer');
 const sharp = require('sharp');
 const path = require('path');
+const { v2: cloudinary } = require('cloudinary');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 // Middleware
 app.use(cors());
@@ -31,7 +38,7 @@ const upload = multer({
 /**
  * نقطة النهاية: POST /merge
  * تستقبل عدة صور (حقل images) مع خيار unifyWidth (true/false)
- * تعيد صورة PNG مدمجة بأعلى جودة (lossless)
+ * تعيد رابط صورة PNG مدمجة بأعلى جودة (lossless) بعد رفعها على Cloudinary
  */
 app.post('/merge', upload.array('images', 20), async (req, res) => {
   try {
@@ -117,10 +124,34 @@ app.post('/merge', upload.array('images', 20), async (req, res) => {
       .png({ compressionLevel: 0, palette: false }) // compressionLevel 0 = lossless, no compression artifacts
       .toBuffer();
 
-    // إرسال الصورة الناتجة
-    res.setHeader('Content-Type', 'image/png');
-    res.setHeader('Content-Disposition', 'inline; filename="merged.png"');
-    res.send(mergedImage);
+    // رفع الصورة الناتجة إلى Cloudinary
+    const cloudinaryResult = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder: 'cookie-typer/merged',
+          resource_type: 'image',
+          format: 'png',
+        },
+        (error, result) => {
+          if (error) {
+            return reject(error);
+          }
+          resolve(result);
+        }
+      );
+
+      stream.end(mergedImage);
+    });
+
+    // إرسال رابط الصورة الناتجة
+    res.json({
+      success: true,
+      url: cloudinaryResult.secure_url,
+      publicId: cloudinaryResult.public_id,
+      width: cloudinaryResult.width,
+      height: cloudinaryResult.height,
+      format: cloudinaryResult.format,
+    });
   } catch (error) {
     console.error('خطأ في الدمج:', error);
     res.status(500).json({ error: 'فشل معالجة الصور على الخادم' });
