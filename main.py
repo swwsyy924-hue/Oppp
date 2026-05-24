@@ -14,9 +14,15 @@ REPLY_MSG = os.getenv("REPLY_MESSAGE", "اختبار تحرير")
 DELAY_MIN = float(os.getenv("DELAY_MIN", "1"))
 DELAY_MAX = float(os.getenv("DELAY_MAX", "3"))
 
-# الرسالتان الجديدتان
-FIRST_MSG = "اسم اختبار تحرير"
-SECOND_MSG = "اختبار تحرير"
+# الرسائل حسب الكلمة
+FIRST_MSG_EDIT = "اسم اختبار تحرير"
+SECOND_MSG_EDIT = "اختبار تحرير"
+
+FIRST_MSG_TRANS = "اسم اختبار ترجمة"
+SECOND_MSG_TRANS = "اختبار ترجمة"
+
+# مجموعة القنوات المنتظرة لأول رسالة
+pending_channels = set()
 
 # إعداد الـ proxy إذا وجد
 proxy = None
@@ -50,42 +56,92 @@ async def on_guild_channel_create(channel):
     if channel.category_id != CATEGORY_ID:
         return
 
-    # تأخير عشوائي لتجنب الاكتشاف
-    delay = random.uniform(DELAY_MIN, DELAY_MAX)
-    await asyncio.sleep(delay)
+    # أضف القناة إلى مجموعة الانتظار حتى أول رسالة
+    pending_channels.add(channel.id)
+    print(f"🆕 قناة جديدة مراقبة: {channel.name} (ID: {channel.id})")
 
-    # محاولة إرسال الرسالة الأولى ("اسم اختبار تحرير") مع إعادة المحاولة التلقائية عند حدوث rate limit
-    for attempt in range(3):
-        try:
-            await channel.send(FIRST_MSG)
-            print(f"📨 [{channel.guild.name}] تم الإرسال الأول في {channel.name}")
-            break
-        except discord.errors.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                retry_after = e.retry_after
-                print(f"⏳ Rate limit، انتظر {retry_after} ثانية...")
-                await asyncio.sleep(retry_after + 0.5)
-            else:
-                print(f"❌ فشل الإرسال الأول: {e}")
+@bot.event
+async def on_message(message):
+    # تجاهل رسائل البوت نفسه
+    if message.author == bot.user:
+        return
+
+    # تحقق إن كانت القناة ضمن قائمة الانتظار
+    if message.channel.id in pending_channels:
+        pending_channels.remove(message.channel.id)
+
+        # تحقق من وجود إيمبد واحد على الأقل
+        if not message.embeds:
+            print(f"❌ أول رسالة في {message.channel.name} لا تحتوي إيمبد - تم التجاهل")
+            return
+
+        # فحص الكلمة داخل الإيمبد (سنبحث في جميع حقول الإيمبد النصية)
+        embed_text = ""
+        embed = message.embeds[0]
+        if embed.title:
+            embed_text += embed.title + " "
+        if embed.description:
+            embed_text += embed.description + " "
+        for field in embed.fields:
+            embed_text += field.name + " " + field.value + " "
+        if embed.footer and embed.footer.text:
+            embed_text += embed.footer.text + " "
+        if embed.author and embed.author.name:
+            embed_text += embed.author.name + " "
+
+        # تحديد أي زوج من الرسائل نستخدم
+        first_msg = None
+        second_msg = None
+
+        if "التحرير" in embed_text:
+            first_msg = FIRST_MSG_EDIT
+            second_msg = SECOND_MSG_EDIT
+        elif "الترجمه الانجليزيه" in embed_text:
+            first_msg = FIRST_MSG_TRANS
+            second_msg = SECOND_MSG_TRANS
+        else:
+            print(f"❌ أول رسالة في {message.channel.name} لا تحتوي الكلمة المطلوبة في الإيمبد - تم التجاهل")
+            return
+
+        # الآن أرسل الرسالتين مع التأخير العشوائي + 5 ثوانٍ بينهما
+        channel = message.channel
+
+        # تأخير عشوائي قبل الأولى (كما كان سابقاً)
+        delay = random.uniform(DELAY_MIN, DELAY_MAX)
+        await asyncio.sleep(delay)
+
+        # إرسال الرسالة الأولى
+        for attempt in range(3):
+            try:
+                await channel.send(first_msg)
+                print(f"📨 [{channel.guild.name}] تم الإرسال الأول ({first_msg}) في {channel.name}")
                 break
+            except discord.errors.HTTPException as e:
+                if e.status == 429:  # Rate limited
+                    retry_after = e.retry_after
+                    print(f"⏳ Rate limit، انتظر {retry_after} ثانية...")
+                    await asyncio.sleep(retry_after + 0.5)
+                else:
+                    print(f"❌ فشل الإرسال الأول: {e}")
+                    break
 
-    # انتظار 5 ثوانٍ ثابتة بين الرسالة الأولى والثانية
-    await asyncio.sleep(5)
+        # انتظار 5 ثوانٍ ثابتة
+        await asyncio.sleep(5)
 
-    # محاولة إرسال الرسالة الثانية ("اختبار تحرير") مع معالجة rate limit
-    for attempt in range(3):
-        try:
-            await channel.send(SECOND_MSG)
-            print(f"📨2 [{channel.guild.name}] تم الإرسال الثاني في {channel.name}")
-            break
-        except discord.errors.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                retry_after = e.retry_after
-                print(f"⏳ Rate limit للرسالة الثانية، انتظر {retry_after} ثانية...")
-                await asyncio.sleep(retry_after + 0.5)
-            else:
-                print(f"❌ فشل الإرسال الثاني: {e}")
+        # إرسال الرسالة الثانية
+        for attempt in range(3):
+            try:
+                await channel.send(second_msg)
+                print(f"📨2 [{channel.guild.name}] تم الإرسال الثاني ({second_msg}) في {channel.name}")
                 break
+            except discord.errors.HTTPException as e:
+                if e.status == 429:
+                    retry_after = e.retry_after
+                    print(f"⏳ Rate limit للرسالة الثانية، انتظر {retry_after} ثانية...")
+                    await asyncio.sleep(retry_after + 0.5)
+                else:
+                    print(f"❌ فشل الإرسال الثاني: {e}")
+                    break
 
 @bot.event
 async def on_command_error(ctx, error):
