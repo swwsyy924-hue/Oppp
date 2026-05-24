@@ -3,6 +3,7 @@ from discord.ext import commands
 import asyncio
 import random
 import os
+import re
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -48,6 +49,14 @@ if PROXY_URL:
     proxy = PROXY_URL
 
 bot = commands.Bot(command_prefix="!", self_bot=True, proxy=proxy)
+
+# دالة مساعدة: إرسال رسالة مع محاكاة الكتابة البشرية
+async def human_send(channel, content, min_typing=1.0, max_typing=3.0):
+    """يُظهر حالة الكتابة لمدة عشوائية ثم يرسل الرسالة"""
+    typing_duration = random.uniform(min_typing, max_typing)
+    async with channel.typing():
+        await asyncio.sleep(typing_duration)
+    await channel.send(content)
 
 @bot.event
 async def on_ready():
@@ -127,15 +136,10 @@ async def on_message(message):
         # استخراج منشن العضو من الإيمبد (وليس منشن الرتبة)
         mention_str = ""
         if message.mentions:
-            # message.mentions يحوي كائنات Member/User الحقيقية، وليس الرتب
             target_user = message.mentions[0]
             mention_str = target_user.mention
         else:
-            # حاول استخراج المنشن يدويًا من نص الرسالة أو الإيمبد النظيف
-            import re
-            # نبحث عن <@!?رقم> ونتأكد أنه ليس رتبة
             raw_text = message.content if message.content else ""
-            # ادمج نصوص الإيمبد أيضًا
             all_text = raw_text + " " + embed_text
             mentions = re.findall(r'<@!?(\d+)>', all_text)
             for uid in mentions:
@@ -146,24 +150,23 @@ async def on_message(message):
         if mention_str:
             third_msg = third_msg_template.replace("{mention}", mention_str)
         else:
-            # إذا لم نعثر على أي منشن، نرسل بدون "يا فلان"
             third_msg = third_msg_template.replace("{mention} يا", "")
 
-        # الآن أرسل الرسالتين الأولى والثانية مع التأخير المطلوب
+        # الآن أرسل الرسائل الثلاث مع محاكاة بشرية
         channel = message.channel
 
         # تأخير عشوائي قبل الأولى (كما كان سابقاً)
         delay = random.uniform(DELAY_MIN, DELAY_MAX)
         await asyncio.sleep(delay)
 
-        # إرسال الرسالة الأولى
+        # إرسال الرسالة الأولى مع حالة "يكتب..."
         for attempt in range(3):
             try:
-                await channel.send(first_msg)
+                await human_send(channel, first_msg)
                 print(f"📨 [{channel.guild.name}] تم الإرسال الأول ({first_msg}) في {channel.name}")
                 break
             except discord.errors.HTTPException as e:
-                if e.status == 429:  # Rate limited
+                if e.status == 429:
                     retry_after = e.retry_after
                     print(f"⏳ Rate limit، انتظر {retry_after} ثانية...")
                     await asyncio.sleep(retry_after + 0.5)
@@ -171,13 +174,13 @@ async def on_message(message):
                     print(f"❌ فشل الإرسال الأول: {e}")
                     break
 
-        # انتظار 5 ثوانٍ ثابتة
+        # انتظار 5 ثوانٍ ثابتة بين الأولى والثانية
         await asyncio.sleep(5)
 
-        # إرسال الرسالة الثانية
+        # إرسال الرسالة الثانية مع حالة "يكتب..."
         for attempt in range(3):
             try:
-                await channel.send(second_msg)
+                await human_send(channel, second_msg)
                 print(f"📨2 [{channel.guild.name}] تم الإرسال الثاني ({second_msg}) في {channel.name}")
                 break
             except discord.errors.HTTPException as e:
@@ -189,10 +192,13 @@ async def on_message(message):
                     print(f"❌ فشل الإرسال الثاني: {e}")
                     break
 
-        # إرسال الرسالة الثالثة مباشرة (بدون تأخير إضافي)
+        # انتظار 3 ثوانٍ بين الثانية والثالثة (الجديد)
+        await asyncio.sleep(3)
+
+        # إرسال الرسالة الثالثة مع حالة "يكتب..."
         for attempt in range(3):
             try:
-                await channel.send(third_msg)
+                await human_send(channel, third_msg)
                 print(f"📨3 [{channel.guild.name}] تم الإرسال الثالث في {channel.name}")
                 break
             except discord.errors.HTTPException as e:
