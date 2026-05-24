@@ -14,6 +14,10 @@ REPLY_MSG = os.getenv("REPLY_MESSAGE", "اختبار تحرير")
 DELAY_MIN = float(os.getenv("DELAY_MIN", "1"))
 DELAY_MAX = float(os.getenv("DELAY_MAX", "3"))
 
+# الرسالتان الجديدتان
+FIRST_MSG = "اسم اختبار تحرير"
+SECOND_MSG = "اختبار تحرير"
+
 # إعداد الـ proxy إذا وجد
 proxy = None
 if PROXY_URL:
@@ -50,11 +54,11 @@ async def on_guild_channel_create(channel):
     delay = random.uniform(DELAY_MIN, DELAY_MAX)
     await asyncio.sleep(delay)
 
-    # محاولة إرسال الرسالة مع إعادة المحاولة التلقائية عند حدوث rate limit
+    # محاولة إرسال الرسالة الأولى ("اسم اختبار تحرير") مع إعادة المحاولة التلقائية عند حدوث rate limit
     for attempt in range(3):
         try:
-            await channel.send(REPLY_MSG)
-            print(f"📨 [{channel.guild.name}] تم الإرسال في {channel.name}")
+            await channel.send(FIRST_MSG)
+            print(f"📨 [{channel.guild.name}] تم الإرسال الأول في {channel.name}")
             break
         except discord.errors.HTTPException as e:
             if e.status == 429:  # Rate limited
@@ -62,7 +66,25 @@ async def on_guild_channel_create(channel):
                 print(f"⏳ Rate limit، انتظر {retry_after} ثانية...")
                 await asyncio.sleep(retry_after + 0.5)
             else:
-                print(f"❌ فشل الإرسال: {e}")
+                print(f"❌ فشل الإرسال الأول: {e}")
+                break
+
+    # انتظار 5 ثوانٍ ثابتة بين الرسالة الأولى والثانية
+    await asyncio.sleep(5)
+
+    # محاولة إرسال الرسالة الثانية ("اختبار تحرير") مع معالجة rate limit
+    for attempt in range(3):
+        try:
+            await channel.send(SECOND_MSG)
+            print(f"📨2 [{channel.guild.name}] تم الإرسال الثاني في {channel.name}")
+            break
+        except discord.errors.HTTPException as e:
+            if e.status == 429:  # Rate limited
+                retry_after = e.retry_after
+                print(f"⏳ Rate limit للرسالة الثانية، انتظر {retry_after} ثانية...")
+                await asyncio.sleep(retry_after + 0.5)
+            else:
+                print(f"❌ فشل الإرسال الثاني: {e}")
                 break
 
 @bot.event
