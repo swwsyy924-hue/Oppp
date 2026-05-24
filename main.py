@@ -21,6 +21,24 @@ SECOND_MSG_EDIT = "اختبار تحرير"
 FIRST_MSG_TRANS = "اسم اختبار ترجمة"
 SECOND_MSG_TRANS = "اختبار ترجمة"
 
+# الرسالة الثالثة للتحرير
+THIRD_MSG_EDIT = (
+    "شكرا لتقديمك لفريقنا يا {mention}\n\n"
+    "اختبارك يبدأ من هذه اللحظة\n\n"
+    "أمامك 4 ساعات فقط لإنهاء الاختبار كاملًا\n\n"
+    "بالتوفيق!\n\n"
+    "ملاحظة: اي سؤال او استفسار بخصوص الاختبار اسأل في التكت وانتظرني او انتظر قدوم الإدارة."
+)
+
+# الرسالة الثالثة للترجمة
+THIRD_MSG_TRANS = (
+    "شكرا لتقديمك لفريقنا يا {mention}\n\n"
+    "اختبارك الانجليزي يبدأ من هذه اللحظة\n\n"
+    "أمامك ساعتين فقط لإنهاء اختبار الانجليزي كاملًا\n\n"
+    "بالتوفيق!\n\n"
+    "ملاحظة: اي سؤال او استفسار بخصوص الاختبار اسأل في التكت وانتظرني او انتظر قدوم الإدارة."
+)
+
 # مجموعة القنوات المنتظرة لأول رسالة
 pending_channels = set()
 
@@ -92,18 +110,46 @@ async def on_message(message):
         # تحديد أي زوج من الرسائل نستخدم
         first_msg = None
         second_msg = None
+        third_msg = None
 
         if "التحرير" in embed_text:
             first_msg = FIRST_MSG_EDIT
             second_msg = SECOND_MSG_EDIT
+            third_msg_template = THIRD_MSG_EDIT
         elif "الترجمه الانجليزيه" in embed_text:
             first_msg = FIRST_MSG_TRANS
             second_msg = SECOND_MSG_TRANS
+            third_msg_template = THIRD_MSG_TRANS
         else:
             print(f"❌ أول رسالة في {message.channel.name} لا تحتوي الكلمة المطلوبة في الإيمبد - تم التجاهل")
             return
 
-        # الآن أرسل الرسالتين مع التأخير العشوائي + 5 ثوانٍ بينهما
+        # استخراج منشن العضو من الإيمبد (وليس منشن الرتبة)
+        mention_str = ""
+        if message.mentions:
+            # message.mentions يحوي كائنات Member/User الحقيقية، وليس الرتب
+            target_user = message.mentions[0]
+            mention_str = target_user.mention
+        else:
+            # حاول استخراج المنشن يدويًا من نص الرسالة أو الإيمبد النظيف
+            import re
+            # نبحث عن <@!?رقم> ونتأكد أنه ليس رتبة
+            raw_text = message.content if message.content else ""
+            # ادمج نصوص الإيمبد أيضًا
+            all_text = raw_text + " " + embed_text
+            mentions = re.findall(r'<@!?(\d+)>', all_text)
+            for uid in mentions:
+                if uid != "1503165397585760428":  # تجنب آيدي الرتبة
+                    mention_str = f"<@{uid}>"
+                    break
+
+        if mention_str:
+            third_msg = third_msg_template.replace("{mention}", mention_str)
+        else:
+            # إذا لم نعثر على أي منشن، نرسل بدون "يا فلان"
+            third_msg = third_msg_template.replace("{mention} يا", "")
+
+        # الآن أرسل الرسالتين الأولى والثانية مع التأخير المطلوب
         channel = message.channel
 
         # تأخير عشوائي قبل الأولى (كما كان سابقاً)
@@ -141,6 +187,21 @@ async def on_message(message):
                     await asyncio.sleep(retry_after + 0.5)
                 else:
                     print(f"❌ فشل الإرسال الثاني: {e}")
+                    break
+
+        # إرسال الرسالة الثالثة مباشرة (بدون تأخير إضافي)
+        for attempt in range(3):
+            try:
+                await channel.send(third_msg)
+                print(f"📨3 [{channel.guild.name}] تم الإرسال الثالث في {channel.name}")
+                break
+            except discord.errors.HTTPException as e:
+                if e.status == 429:
+                    retry_after = e.retry_after
+                    print(f"⏳ Rate limit للرسالة الثالثة، انتظر {retry_after} ثانية...")
+                    await asyncio.sleep(retry_after + 0.5)
+                else:
+                    print(f"❌ فشل الإرسال الثالث: {e}")
                     break
 
 @bot.event
