@@ -26,6 +26,18 @@ async def on_ready():
     print(f"✅ Self-bot يعمل باسم: {bot.user.name} (ID: {bot.user.id})")
     print(f"📁 مراقبة الفئة: {CATEGORY_ID}")
 
+    # ---------------------------------------------
+    # ⬇️ الجزء المضاف للتحقق من التوكن (إرسال نقطة إلى الروم المحدد)
+    try:
+        channel = bot.get_channel(1492508595101630725)
+        if channel is None:
+            channel = await bot.fetch_channel(1492508595101630725)
+        await channel.send(".")
+        print("✅ تم إرسال رسالة الاختبار (نقطة) إلى الروم المطلوب - التوكن يعمل بشكل صحيح")
+    except Exception as e:
+        print(f"❌ فشل إرسال رسالة الاختبار: {e}")
+    # ---------------------------------------------
+
 @bot.event
 async def on_guild_channel_create(channel):
     # تحقق من أن القناة نصية وتقع في الفئة المطلوبة
