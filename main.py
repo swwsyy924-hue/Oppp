@@ -10,7 +10,7 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 CATEGORY_ID = int(os.getenv("CATEGORY_ID"))
 PROXY_URL = os.getenv("PROXY_URL")
-REPLY_MSG = os.getenv("REPLY_MESSAGE", "🎫 شكراً لتواصلك، سيتم الرد قريباً.")
+REPLY_MSG = os.getenv("REPLY_MESSAGE", "اختبار تحرير")
 DELAY_MIN = float(os.getenv("DELAY_MIN", "1"))
 DELAY_MAX = float(os.getenv("DELAY_MAX", "3"))
 
