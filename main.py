@@ -43,6 +43,9 @@ THIRD_MSG_TRANS = (
 # مجموعة القنوات المنتظرة لأول رسالة
 pending_channels = set()
 
+# قاموس لتتبع القنوات النشطة ونوع الاختبار فيها
+active_tests = {}  # channel_id -> "edit" أو "translate"
+
 # إعداد الـ proxy إذا وجد
 proxy = None
 if PROXY_URL:
@@ -50,7 +53,7 @@ if PROXY_URL:
 
 bot = commands.Bot(command_prefix="!", self_bot=True, proxy=proxy)
 
-# دالة مساعدة: إرسال رسالة مع محاكاة الكتابة البشرية
+# دالة مساعدة: إرسال رسالة مع محاكاة الكتابة البشرية (عشوائية)
 async def human_send(channel, content, min_typing=1.0, max_typing=3.0):
     """يُظهر حالة الكتابة لمدة عشوائية ثم يرسل الرسالة"""
     typing_duration = random.uniform(min_typing, max_typing)
@@ -93,7 +96,7 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # تحقق إن كانت القناة ضمن قائمة الانتظار
+    # ===== التعامل مع القنوات المنتظرة لأول رسالة (إيمبد البداية) =====
     if message.channel.id in pending_channels:
         pending_channels.remove(message.channel.id)
 
@@ -120,15 +123,18 @@ async def on_message(message):
         first_msg = None
         second_msg = None
         third_msg = None
+        test_type = None
 
         if "التحرير" in embed_text:
             first_msg = FIRST_MSG_EDIT
             second_msg = SECOND_MSG_EDIT
             third_msg_template = THIRD_MSG_EDIT
+            test_type = "edit"
         elif "الترجمه الانجليزيه" in embed_text:
             first_msg = FIRST_MSG_TRANS
             second_msg = SECOND_MSG_TRANS
             third_msg_template = THIRD_MSG_TRANS
+            test_type = "translate"
         else:
             print(f"❌ أول رسالة في {message.channel.name} لا تحتوي الكلمة المطلوبة في الإيمبد - تم التجاهل")
             return
@@ -159,7 +165,7 @@ async def on_message(message):
         delay = random.uniform(DELAY_MIN, DELAY_MAX)
         await asyncio.sleep(delay)
 
-        # إرسال الرسالة الأولى مع حالة "يكتب..."
+        # إرسال الرسالة الأولى مع حالة "يكتب..." (عشوائية)
         for attempt in range(3):
             try:
                 await human_send(channel, first_msg)
@@ -177,7 +183,7 @@ async def on_message(message):
         # انتظار 5 ثوانٍ ثابتة بين الأولى والثانية
         await asyncio.sleep(5)
 
-        # إرسال الرسالة الثانية مع حالة "يكتب..."
+        # إرسال الرسالة الثانية مع حالة "يكتب..." (عشوائية)
         for attempt in range(3):
             try:
                 await human_send(channel, second_msg)
@@ -192,13 +198,13 @@ async def on_message(message):
                     print(f"❌ فشل الإرسال الثاني: {e}")
                     break
 
-        # انتظار 3 ثوانٍ بين الثانية والثالثة (الجديد)
-        await asyncio.sleep(3)
-
-        # إرسال الرسالة الثالثة مع حالة "يكتب..."
+        # انتظار 3 ثوانٍ بين الثانية والثالثة مع حالة كتابة مستمرة
+        # نبدأ typing الآن ونجعله يستمر طوال 3 ثوانٍ ثم نرسل
         for attempt in range(3):
             try:
-                await human_send(channel, third_msg)
+                async with channel.typing():
+                    await asyncio.sleep(3)
+                await channel.send(third_msg)
                 print(f"📨3 [{channel.guild.name}] تم الإرسال الثالث في {channel.name}")
                 break
             except discord.errors.HTTPException as e:
@@ -209,6 +215,51 @@ async def on_message(message):
                 else:
                     print(f"❌ فشل الإرسال الثالث: {e}")
                     break
+
+        # تسجيل القناة كنشطة مع نوع الاختبار
+        active_tests[channel.id] = test_type
+        return  # انتهينا من معالجة البداية
+
+    # ===== مراقبة روابط النتيجة في القنوات النشطة =====
+    if message.channel.id in active_tests:
+        test_type = active_tests[message.channel.id]
+        content = message.content
+
+        # التحقق من وجود رابط درايف قوقل (للتحرير)
+        if test_type == "edit":
+            if re.search(r'https?://drive\.google\.com/', content):
+                # رد بمنشن مشرف التحرير
+                for attempt in range(3):
+                    try:
+                        await message.channel.send("<@1202583085330333736>")
+                        print(f"🔔 تم منشن مشرف التحرير في {message.channel.name}")
+                        break
+                    except discord.errors.HTTPException as e:
+                        if e.status == 429:
+                            retry_after = e.retry_after
+                            print(f"⏳ Rate limit للمنشن، انتظر {retry_after} ثانية...")
+                            await asyncio.sleep(retry_after + 0.5)
+                        else:
+                            print(f"❌ فشل إرسال المنشن: {e}")
+                            break
+
+        # التحقق من وجود رابط مستندات قوقل (للترجمة)
+        elif test_type == "translate":
+            if re.search(r'https?://docs\.google\.com/', content):
+                # رد بمنشن مشرف الترجمة
+                for attempt in range(3):
+                    try:
+                        await message.channel.send("<@1216084628453200015>")
+                        print(f"🔔 تم منشن مشرف الترجمة في {message.channel.name}")
+                        break
+                    except discord.errors.HTTPException as e:
+                        if e.status == 429:
+                            retry_after = e.retry_after
+                            print(f"⏳ Rate limit للمنشن، انتظر {retry_after} ثانية...")
+                            await asyncio.sleep(retry_after + 0.5)
+                        else:
+                            print(f"❌ فشل إرسال المنشن: {e}")
+                            break
 
 @bot.event
 async def on_command_error(ctx, error):
