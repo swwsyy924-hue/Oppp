@@ -4,7 +4,6 @@ import asyncio
 import random
 import os
 import re
-import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,9 +15,9 @@ REPLY_MSG = os.getenv("REPLY_MESSAGE", "اختبار تحرير")
 DELAY_MIN = float(os.getenv("DELAY_MIN", "1"))
 DELAY_MAX = float(os.getenv("DELAY_MAX", "3"))
 
-# مدد الاختبارات بالثواني
-EDIT_TEST_DURATION_SEC = 1 * 60      # 5 دقائق (للتجربة)
-TRANSLATE_TEST_DURATION_SEC = 120 * 60  # ساعتان (حقيقي)
+# مدد الاختبارات بالثواني (حقيقي)
+EDIT_TEST_DURATION_SEC = 4 * 3600       # 4 ساعات
+TRANSLATE_TEST_DURATION_SEC = 2 * 3600  # ساعتان
 
 # الرسائل حسب الكلمة
 FIRST_MSG_EDIT = "اسم اختبار تحرير"
@@ -45,11 +44,20 @@ THIRD_MSG_TRANS = (
     "ملاحظة: اي سؤال او استفسار بخصوص الاختبار اسأل في التكت وانتظرني او انتظر قدوم الإدارة."
 )
 
+# رسالة الفشل (عند انتهاء الوقت دون إرسال الرابط)
+FAIL_MSG = (
+    "{mention} انتهى وقت الاختبار للأسف 🤷‍♂️.\n"
+    "لقد فشلت في الاختبار. سيتم إغلاق التكت بعد نصف ساعة."
+)
+
 # مجموعة القنوات المنتظرة لأول رسالة
 pending_channels = set()
 
-# قاموس لتتبع القنوات النشطة ونوع الاختبار فيها
-active_tests = {}  # channel_id -> "edit" أو "translate"
+# قاموس لتتبع القنوات النشطة ونوع الاختبار ومعلومات المقدم
+active_tests = {}          # channel_id -> "edit" أو "translate"
+applicant_info = {}        # channel_id -> {"id": int, "mention": str}
+applicant_spoke = set()    # قنوات أرسل فيها المقدم رسالة واحدة على الأقل
+link_submitted = set()     # قنوات أرسل فيها المقدم رابط الاختبار
 
 # قاموس لتخزين مهام الإغلاق التلقائي
 close_tasks = {}
@@ -69,28 +77,48 @@ async def human_send(channel, content, min_typing=1.0, max_typing=3.0):
         await asyncio.sleep(typing_duration)
     await channel.send(content)
 
-async def auto_close_channel(channel, test_type):
-    """ينتظر المدة المحددة للاختبار ثم يغلق الروم عبر إرسال 'اغلاق' ثم الضغط على زر 'تأكيد'"""
-    if test_type == "edit":
-        duration = EDIT_TEST_DURATION_SEC
-    else:
-        duration = TRANSLATE_TEST_DURATION_SEC
-
+async def monitor_test(channel, test_type, applicant_id, applicant_mention):
+    """تراقب تقدم الاختبار وتقرر الإغلاق أو إرسال رسالة الفشل"""
+    duration = EDIT_TEST_DURATION_SEC if test_type == "edit" else TRANSLATE_TEST_DURATION_SEC
     await asyncio.sleep(duration)
 
+    # إذا أُرسل رابط الاختبار خلال الفترة المسموحة → ألغِ المهمة بهدوء
+    if channel.id in link_submitted:
+        print(f"✅ تم تسليم الاختبار في {channel.name} - لن يتم الإغلاق التلقائي")
+        return
+
     try:
-        # 1. إعادة جلب القناة للتأكد من وجودها
+        # إعادة جلب القناة
         try:
             channel = await bot.fetch_channel(channel.id)
         except discord.NotFound:
-            print(f"❌ القناة لم تعد موجودة، تخطي الإغلاق")
+            print(f"❌ القناة لم تعد موجودة، تخطي")
             return
 
-        # 2. إرسال كلمة "اغلاق"
+        # الحالة 1: المقدم لم يرسل أي رسالة نهائيًا
+        if channel.id not in applicant_spoke:
+            print(f"⏰ لم يرسل المقدم أي رسالة في {channel.name} - إغلاق مباشر")
+            await close_ticket(channel)
+            return
+
+        # الحالة 2: المقدم أرسل رسائل لكن لم يرسل رابط الاختبار
+        if channel.id not in link_submitted:
+            print(f"⏰ انتهى الوقت دون رابط في {channel.name} - إرسال رسالة الفشل")
+            fail_text = FAIL_MSG.replace("{mention}", applicant_mention)
+            await channel.send(fail_text)
+            await asyncio.sleep(1800)  # انتظر نصف ساعة
+            await close_ticket(channel)
+            return
+
+    except Exception as e:
+        print(f"❌ خطأ في monitor_test: {e}")
+
+async def close_ticket(channel):
+    """تغلق التكت بكتابة 'اغلاق' ثم الضغط على 'تأكيد'"""
+    try:
         await channel.send("اغلاق")
         print(f"💬 تم إرسال 'اغلاق' في {channel.name}")
 
-        # 3. انتظار ظهور رسالة التأكيد (بها زرين: إلغاء / تأكيد ✅)
         def check(m):
             if m.channel.id != channel.id:
                 return False
@@ -105,7 +133,7 @@ async def auto_close_channel(channel, test_type):
             return False
 
         confirm_msg = None
-        for attempt in range(10):  # نحاول حتى 10 مرات بفاصل 2 ثانية
+        for _ in range(10):
             try:
                 confirm_msg = await bot.wait_for('message', timeout=2.0, check=check)
                 break
@@ -113,10 +141,9 @@ async def auto_close_channel(channel, test_type):
                 continue
 
         if confirm_msg is None:
-            print(f"❌ لم تظهر رسالة تأكيد في {channel.name} بعد 20 ثانية")
+            print(f"❌ لم تظهر رسالة تأكيد في {channel.name}")
             return
 
-        # 4. الضغط على زر "تأكيد ✅"
         for row in confirm_msg.components:
             for c in row.children:
                 if isinstance(c, discord.Button) and "تأكيد" in c.label:
@@ -124,7 +151,7 @@ async def auto_close_channel(channel, test_type):
                     print(f"✅ تم الضغط على '{c.label}' وإغلاق الروم {channel.name}")
                     return
 
-        print(f"❌ لم يتم العثور على زر تأكيد في رسالة التأكيد")
+        print(f"❌ لم يتم العثور على زر تأكيد")
 
     except Exception as e:
         print(f"❌ فشل إغلاق الروم {channel.name}: {e}")
@@ -134,8 +161,6 @@ async def on_ready():
     print(f"✅ Self-bot يعمل باسم: {bot.user.name} (ID: {bot.user.id})")
     print(f"📁 مراقبة الفئة: {CATEGORY_ID}")
 
-    # ---------------------------------------------
-    # ⬇️ الجزء المضاف للتحقق من التوكن (إرسال نقطة إلى الروم المحدد)
     try:
         channel = bot.get_channel(1492508595101630725)
         if channel is None:
@@ -144,23 +169,19 @@ async def on_ready():
         print("✅ تم إرسال رسالة الاختبار (نقطة) إلى الروم المطلوب - التوكن يعمل بشكل صحيح")
     except Exception as e:
         print(f"❌ فشل إرسال رسالة الاختبار: {e}")
-    # ---------------------------------------------
 
 @bot.event
 async def on_guild_channel_create(channel):
-    # تحقق من أن القناة نصية وتقع في الفئة المطلوبة
     if not isinstance(channel, discord.TextChannel):
         return
     if channel.category_id != CATEGORY_ID:
         return
 
-    # أضف القناة إلى مجموعة الانتظار حتى أول رسالة
     pending_channels.add(channel.id)
     print(f"🆕 قناة جديدة مراقبة: {channel.name} (ID: {channel.id})")
 
 @bot.event
 async def on_message(message):
-    # تجاهل رسائل البوت نفسه
     if message.author == bot.user:
         return
 
@@ -168,12 +189,10 @@ async def on_message(message):
     if message.channel.id in pending_channels:
         pending_channels.remove(message.channel.id)
 
-        # تحقق من وجود إيمبد واحد على الأقل
         if not message.embeds:
             print(f"❌ أول رسالة في {message.channel.name} لا تحتوي إيمبد - تم التجاهل")
             return
 
-        # فحص الكلمة داخل الإيمبد (سنبحث في جميع حقول الإيمبد النصية)
         embed_text = ""
         embed = message.embeds[0]
         if embed.title:
@@ -187,7 +206,6 @@ async def on_message(message):
         if embed.author and embed.author.name:
             embed_text += embed.author.name + " "
 
-        # تحديد أي زوج من الرسائل نستخدم
         first_msg = None
         second_msg = None
         third_msg = None
@@ -207,11 +225,12 @@ async def on_message(message):
             print(f"❌ أول رسالة في {message.channel.name} لا تحتوي الكلمة المطلوبة في الإيمبد - تم التجاهل")
             return
 
-        # استخراج منشن العضو من الإيمبد (وليس منشن الرتبة)
+        # استخراج المقدم (ID و mention)
+        app_user = None
         mention_str = ""
         if message.mentions:
-            target_user = message.mentions[0]
-            mention_str = target_user.mention
+            app_user = message.mentions[0]
+            mention_str = app_user.mention
         else:
             raw_text = message.content if message.content else ""
             all_text = raw_text + " " + embed_text
@@ -219,25 +238,32 @@ async def on_message(message):
             for uid in mentions:
                 if uid != "1503165397585760428":  # تجنب آيدي الرتبة
                     mention_str = f"<@{uid}>"
+                    # نحتاج لتحويل uid إلى كائن مستخدم (اختياري)
+                    try:
+                        app_user = await bot.fetch_user(int(uid))
+                    except:
+                        pass
                     break
 
-        if mention_str:
-            third_msg = third_msg_template.replace("{mention}", mention_str)
-        else:
-            third_msg = third_msg_template.replace("{mention} يا", "")
+        if app_user is None:
+            print(f"❌ لم يتم العثور على المقدم في {message.channel.name}")
+            return
 
-        # الآن أرسل الرسائل الثلاث مع محاكاة بشرية
+        applicant_info[message.channel.id] = {"id": app_user.id, "mention": mention_str}
+
+        third_msg = third_msg_template.replace("{mention}", mention_str)
+
         channel = message.channel
 
-        # تأخير عشوائي قبل الأولى (كما كان سابقاً)
+        # تأخير عشوائي قبل الأولى
         delay = random.uniform(DELAY_MIN, DELAY_MAX)
         await asyncio.sleep(delay)
 
-        # إرسال الرسالة الأولى مع حالة "يكتب..." (عشوائية)
+        # الرسالة الأولى
         for attempt in range(3):
             try:
                 await human_send(channel, first_msg)
-                print(f"📨 [{channel.guild.name}] تم الإرسال الأول ({first_msg}) في {channel.name}")
+                print(f"📨 [{channel.guild.name}] تم الإرسال الأول في {channel.name}")
                 break
             except discord.errors.HTTPException as e:
                 if e.status == 429:
@@ -248,14 +274,14 @@ async def on_message(message):
                     print(f"❌ فشل الإرسال الأول: {e}")
                     break
 
-        # انتظار 5 ثوانٍ ثابتة بين الأولى والثانية
-        await asyncio.sleep(5)
+        # انتظار ثانية واحدة فقط بين الأولى والثانية
+        await asyncio.sleep(1)
 
-        # إرسال الرسالة الثانية مع حالة "يكتب..." (عشوائية)
+        # الرسالة الثانية
         for attempt in range(3):
             try:
                 await human_send(channel, second_msg)
-                print(f"📨2 [{channel.guild.name}] تم الإرسال الثاني ({second_msg}) في {channel.name}")
+                print(f"📨2 [{channel.guild.name}] تم الإرسال الثاني في {channel.name}")
                 break
             except discord.errors.HTTPException as e:
                 if e.status == 429:
@@ -266,12 +292,13 @@ async def on_message(message):
                     print(f"❌ فشل الإرسال الثاني: {e}")
                     break
 
-        # انتظار 3 ثوانٍ بين الثانية والثالثة مع حالة كتابة مستمرة
-        # نبدأ typing الآن ونجعله يستمر طوال 3 ثوانٍ ثم نرسل
+        # انتظار ثانيتين ثم 5 ثوانٍ كتابة للرسالة الثالثة
+        await asyncio.sleep(2)
+
         for attempt in range(3):
             try:
                 async with channel.typing():
-                    await asyncio.sleep(3)
+                    await asyncio.sleep(5)
                 await channel.send(third_msg)
                 print(f"📨3 [{channel.guild.name}] تم الإرسال الثالث في {channel.name}")
                 break
@@ -284,55 +311,44 @@ async def on_message(message):
                     print(f"❌ فشل الإرسال الثالث: {e}")
                     break
 
-        # تسجيل القناة كنشطة مع نوع الاختبار
         active_tests[channel.id] = test_type
 
-        # بدء مهمة الإغلاق التلقائي بعد المدة المحددة
-        task = asyncio.create_task(auto_close_channel(channel, test_type))
+        # بدء مهمة المراقبة
+        task = asyncio.create_task(
+            monitor_test(channel, test_type, app_user.id, mention_str)
+        )
         close_tasks[channel.id] = task
 
-        return  # انتهينا من معالجة البداية
+        return
 
-    # ===== مراقبة روابط النتيجة في القنوات النشطة =====
+    # ===== مراقبة رسائل المقدم وروابط النتيجة =====
     if message.channel.id in active_tests:
+        # تسجيل أن المقدم تكلم (إذا كان هو صاحب التكت)
+        applicant = applicant_info.get(message.channel.id)
+        if applicant and message.author.id == applicant["id"]:
+            applicant_spoke.add(message.channel.id)
+
         test_type = active_tests[message.channel.id]
         content = message.content
 
-        # التحقق من وجود رابط درايف قوقل (للتحرير)
-        if test_type == "edit":
-            if re.search(r'https?://drive\.google\.com/', content):
-                # رد بمنشن مشرف التحرير
-                for attempt in range(3):
-                    try:
-                        await message.channel.send("<@1202583085330333736>")
-                        print(f"🔔 تم منشن مشرف التحرير في {message.channel.name}")
-                        break
-                    except discord.errors.HTTPException as e:
-                        if e.status == 429:
-                            retry_after = e.retry_after
-                            print(f"⏳ Rate limit للمنشن، انتظر {retry_after} ثانية...")
-                            await asyncio.sleep(retry_after + 0.5)
-                        else:
-                            print(f"❌ فشل إرسال المنشن: {e}")
-                            break
+        # تحقق من رابط درايف قوقل (للتحرير)
+        if test_type == "edit" and re.search(r'https?://drive\.google\.com/', content):
+            if message.channel.id not in link_submitted:
+                link_submitted.add(message.channel.id)
+                # ألغِ مهمة الإغلاق التلقائي
+                if message.channel.id in close_tasks:
+                    close_tasks[message.channel.id].cancel()
+                await message.channel.send("<@1202583085330333736>")
+                print(f"🔔 تم منشن مشرف التحرير في {message.channel.name} - تم إلغاء الإغلاق التلقائي")
 
-        # التحقق من وجود رابط مستندات قوقل (للترجمة)
-        elif test_type == "translate":
-            if re.search(r'https?://docs\.google\.com/', content):
-                # رد بمنشن مشرف الترجمة
-                for attempt in range(3):
-                    try:
-                        await message.channel.send("<@1216084628453200015>")
-                        print(f"🔔 تم منشن مشرف الترجمة في {message.channel.name}")
-                        break
-                    except discord.errors.HTTPException as e:
-                        if e.status == 429:
-                            retry_after = e.retry_after
-                            print(f"⏳ Rate limit للمنشن، انتظر {retry_after} ثانية...")
-                            await asyncio.sleep(retry_after + 0.5)
-                        else:
-                            print(f"❌ فشل إرسال المنشن: {e}")
-                            break
+        # تحقق من رابط مستندات قوقل (للترجمة)
+        elif test_type == "translate" and re.search(r'https?://docs\.google\.com/', content):
+            if message.channel.id not in link_submitted:
+                link_submitted.add(message.channel.id)
+                if message.channel.id in close_tasks:
+                    close_tasks[message.channel.id].cancel()
+                await message.channel.send("<@1216084628453200015>")
+                print(f"🔔 تم منشن مشرف الترجمة في {message.channel.name} - تم إلغاء الإغلاق التلقائي")
 
 @bot.event
 async def on_command_error(ctx, error):
