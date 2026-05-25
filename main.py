@@ -15,9 +15,10 @@ REPLY_MSG = os.getenv("REPLY_MESSAGE", "اختبار تحرير")
 DELAY_MIN = float(os.getenv("DELAY_MIN", "1"))
 DELAY_MAX = float(os.getenv("DELAY_MAX", "3"))
 
-# مدد الاختبارات بالثواني (حقيقي)
+# مدد الاختبارات بالثواني
 EDIT_TEST_DURATION_SEC = 4 * 3600       # 4 ساعات
 TRANSLATE_TEST_DURATION_SEC = 2 * 3600  # ساعتان
+WHITENING_TEST_DURATION_SEC = 3 * 3600  # 3 ساعات
 
 # الرسائل حسب الكلمة
 FIRST_MSG_EDIT = "اسم اختبار تحرير"
@@ -26,22 +27,41 @@ SECOND_MSG_EDIT = "اختبار تحرير"
 FIRST_MSG_TRANS = "اسم اختبار ترجمة"
 SECOND_MSG_TRANS = "اختبار ترجمة"
 
-# الرسالة الثالثة للتحرير
+FIRST_MSG_WHITENING = "اسم اختبار تبييض"
+SECOND_MSG_WHITENING = "اختبار تبييض"
+
+# الرسالة الثالثة للتحرير (محسّنة بالماركدون)
 THIRD_MSG_EDIT = (
-    "شكرا لتقديمك لفريقنا يا {mention}\n\n"
-    "اختبارك يبدأ من هذه اللحظة\n\n"
-    "أمامك 4 ساعات فقط لإنهاء الاختبار كاملًا\n\n"
-    "بالتوفيق!\n\n"
-    "ملاحظة: اي سؤال او استفسار بخصوص الاختبار اسأل في التكت وانتظرني او انتظر قدوم الإدارة."
+    "# شكراً لتقديمك يا {mention}\n\n"
+    "**اختبارك يبدأ من هذه اللحظة**\n\n"
+    "> أمامك **4 ساعات** فقط لإنهاء الاختبار كاملاً\n\n"
+    "- يرجى قراءة التعليمات جيداً قبل البدء\n"
+    "- التسليم عبر رابط **Google Drive** فقط\n\n"
+    "**بالتوفيق!**\n\n"
+    "-# ملاحظة: أي سؤال أو استفسار بخصوص الاختبار اسأل في التكت وانتظرني أو انتظر قدوم الإدارة"
 )
 
-# الرسالة الثالثة للترجمة
+# الرسالة الثالثة للترجمة (محسّنة بالماركدون)
 THIRD_MSG_TRANS = (
-    "شكرا لتقديمك لفريقنا يا {mention}\n\n"
-    "اختبارك الانجليزي يبدأ من هذه اللحظة\n\n"
-    "أمامك ساعتان فقط لإنهاء اختبار الانجليزي كاملًا\n\n"
-    "بالتوفيق!\n\n"
-    "ملاحظة: اي سؤال او استفسار بخصوص الاختبار اسأل في التكت وانتظرني او انتظر قدوم الإدارة."
+    "# شكراً لتقديمك يا {mention}\n\n"
+    "**اختبارك الانجليزي يبدأ من هذه اللحظة**\n\n"
+    "> أمامك **ساعتان** فقط لإنهاء الاختبار كاملاً\n\n"
+    "- يرجى قراءة التعليمات جيداً قبل البدء\n"
+    "- التسليم عبر رابط **Google Docs** فقط\n\n"
+    "**بالتوفيق!**\n\n"
+    "-# ملاحظة: أي سؤال أو استفسار بخصوص الاختبار اسأل في التكت وانتظرني أو انتظر قدوم الإدارة"
+)
+
+# الرسالة الثالثة للتبييض (محسّنة بالماركدون)
+THIRD_MSG_WHITENING = (
+    "# شكراً لتقديمك يا {mention}\n\n"
+    "**اختبارك يبدأ من هذه اللحظة**\n\n"
+    "> أمامك **3 ساعات** فقط لإنهاء اختبار التبييض كاملاً\n\n"
+    "- يرجى قراءة التعليمات جيداً قبل البدء\n"
+    "- صور الاختبار **4**، قم بعمل **2** منهم فقط\n"
+    "- التسليم عبر رابط **Google Drive** فقط\n\n"
+    "**بالتوفيق!**\n\n"
+    "-# ملاحظة: أي سؤال أو استفسار بخصوص الاختبار اسأل في التكت وانتظرني أو انتظر قدوم الإدارة"
 )
 
 # رسالة الفشل (عند انتهاء الوقت دون إرسال الرابط)
@@ -54,13 +74,16 @@ FAIL_MSG = (
 pending_channels = set()
 
 # قاموس لتتبع القنوات النشطة ونوع الاختبار ومعلومات المقدم
-active_tests = {}          # channel_id -> "edit" أو "translate"
+active_tests = {}          # channel_id -> "edit" أو "translate" أو "whitening"
 applicant_info = {}        # channel_id -> {"id": int, "mention": str}
 applicant_spoke = set()    # قنوات أرسل فيها المقدم رسالة واحدة على الأقل
 link_submitted = set()     # قنوات أرسل فيها المقدم رابط الاختبار
 
 # قاموس لتخزين مهام الإغلاق التلقائي
 close_tasks = {}
+
+# قاموس لتخزين مهام التذكير الدورية
+reminder_tasks = {}
 
 # إعداد الـ proxy إذا وجد
 proxy = None
@@ -79,7 +102,13 @@ async def human_send(channel, content, min_typing=1.0, max_typing=3.0):
 
 async def monitor_test(channel, test_type, applicant_id, applicant_mention):
     """تراقب تقدم الاختبار وتقرر الإغلاق أو إرسال رسالة الفشل"""
-    duration = EDIT_TEST_DURATION_SEC if test_type == "edit" else TRANSLATE_TEST_DURATION_SEC
+    if test_type == "edit":
+        duration = EDIT_TEST_DURATION_SEC
+    elif test_type == "translate":
+        duration = TRANSLATE_TEST_DURATION_SEC
+    else:
+        duration = WHITENING_TEST_DURATION_SEC
+
     await asyncio.sleep(duration)
 
     # إذا أُرسل رابط الاختبار خلال الفترة المسموحة → ألغِ المهمة بهدوء
@@ -156,6 +185,42 @@ async def close_ticket(channel):
     except Exception as e:
         print(f"❌ فشل إغلاق الروم {channel.name}: {e}")
 
+async def periodic_reminder(channel_id, applicant_mention, duration, test_type):
+    """يرسل تذكيراً كل ساعة للمُقدّم الذي لم يكتب أي شيء بعد"""
+    interval = 3600  # ثانية (ساعة)
+    elapsed = 0
+    while elapsed < duration:
+        await asyncio.sleep(interval)
+        elapsed += interval
+
+        # توقف إذا أرسل المقدم رسالة أو رابط
+        if channel_id in applicant_spoke or channel_id in link_submitted:
+            break
+
+        # جلب القناة الحالية
+        try:
+            channel = await bot.fetch_channel(channel_id)
+        except discord.NotFound:
+            break
+
+        # حساب الوقت المتبقي
+        remaining = duration - elapsed
+        if remaining <= 0:
+            break
+        hours = remaining // 3600
+        minutes = (remaining % 3600) // 60
+        if hours > 0:
+            time_str = f"{hours} ساعة"
+        else:
+            time_str = f"{minutes} دقيقة"
+
+        reminder = f"تذكير {applicant_mention}، لم تقم بإرسال أي شيء بعد.\nالوقت المتبقي: {time_str}."
+        try:
+            await channel.send(reminder)
+            print(f"🔔 تذكير في {channel.name}")
+        except Exception as e:
+            print(f"❌ فشل إرسال التذكير: {e}")
+
 @bot.event
 async def on_ready():
     print(f"✅ Self-bot يعمل باسم: {bot.user.name} (ID: {bot.user.id})")
@@ -221,6 +286,11 @@ async def on_message(message):
             second_msg = SECOND_MSG_TRANS
             third_msg_template = THIRD_MSG_TRANS
             test_type = "translate"
+        elif "تبييض" in embed_text:
+            first_msg = FIRST_MSG_WHITENING
+            second_msg = SECOND_MSG_WHITENING
+            third_msg_template = THIRD_MSG_WHITENING
+            test_type = "whitening"
         else:
             print(f"❌ أول رسالة في {message.channel.name} لا تحتوي الكلمة المطلوبة في الإيمبد - تم التجاهل")
             return
@@ -238,7 +308,6 @@ async def on_message(message):
             for uid in mentions:
                 if uid != "1503165397585760428":  # تجنب آيدي الرتبة
                     mention_str = f"<@{uid}>"
-                    # نحتاج لتحويل uid إلى كائن مستخدم (اختياري)
                     try:
                         app_user = await bot.fetch_user(int(uid))
                     except:
@@ -319,6 +388,20 @@ async def on_message(message):
         )
         close_tasks[channel.id] = task
 
+        # بدء مهمة التذكير الدورية (كل ساعة)
+        # نحدد المدة حسب نوع الاختبار
+        if test_type == "edit":
+            dur = EDIT_TEST_DURATION_SEC
+        elif test_type == "translate":
+            dur = TRANSLATE_TEST_DURATION_SEC
+        else:
+            dur = WHITENING_TEST_DURATION_SEC
+
+        reminder_task = asyncio.create_task(
+            periodic_reminder(channel.id, mention_str, dur, test_type)
+        )
+        reminder_tasks[channel.id] = reminder_task
+
         return
 
     # ===== مراقبة رسائل المقدم وروابط النتيجة =====
@@ -338,6 +421,9 @@ async def on_message(message):
                 # ألغِ مهمة الإغلاق التلقائي
                 if message.channel.id in close_tasks:
                     close_tasks[message.channel.id].cancel()
+                # ألغِ مهمة التذكير
+                if message.channel.id in reminder_tasks:
+                    reminder_tasks[message.channel.id].cancel()
                 await message.channel.send("<@1202583085330333736>")
                 print(f"🔔 تم منشن مشرف التحرير في {message.channel.name} - تم إلغاء الإغلاق التلقائي")
 
@@ -347,8 +433,21 @@ async def on_message(message):
                 link_submitted.add(message.channel.id)
                 if message.channel.id in close_tasks:
                     close_tasks[message.channel.id].cancel()
+                if message.channel.id in reminder_tasks:
+                    reminder_tasks[message.channel.id].cancel()
                 await message.channel.send("<@1216084628453200015>")
                 print(f"🔔 تم منشن مشرف الترجمة في {message.channel.name} - تم إلغاء الإغلاق التلقائي")
+
+        # تحقق من رابط درايف قوقل (للتبييض)
+        elif test_type == "whitening" and re.search(r'https?://drive\.google\.com/', content):
+            if message.channel.id not in link_submitted:
+                link_submitted.add(message.channel.id)
+                if message.channel.id in close_tasks:
+                    close_tasks[message.channel.id].cancel()
+                if message.channel.id in reminder_tasks:
+                    reminder_tasks[message.channel.id].cancel()
+                await message.channel.send("<@1334530342899421287>")
+                print(f"🔔 تم منشن مشرف التبييض في {message.channel.name} - تم إلغاء الإغلاق التلقائي")
 
 @bot.event
 async def on_command_error(ctx, error):
