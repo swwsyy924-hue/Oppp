@@ -17,7 +17,7 @@ DELAY_MIN = float(os.getenv("DELAY_MIN", "1"))
 DELAY_MAX = float(os.getenv("DELAY_MAX", "3"))
 
 # مدد الاختبارات بالثواني
-EDIT_TEST_DURATION_SEC = 5 * 60      # 5 دقائق (للتجربة)
+EDIT_TEST_DURATION_SEC = 1 * 60      # 5 دقائق (للتجربة)
 TRANSLATE_TEST_DURATION_SEC = 120 * 60  # ساعتان (حقيقي)
 
 # الرسائل حسب الكلمة
@@ -70,7 +70,7 @@ async def human_send(channel, content, min_typing=1.0, max_typing=3.0):
     await channel.send(content)
 
 async def auto_close_channel(channel, test_type):
-    """ينتظر المدة المحددة للاختبار ثم يغلق الروم عبر الأزرار"""
+    """ينتظر المدة المحددة للاختبار ثم يغلق الروم عبر إرسال 'اغلاق' ثم الضغط على زر 'تأكيد'"""
     if test_type == "edit":
         duration = EDIT_TEST_DURATION_SEC
     else:
@@ -79,57 +79,52 @@ async def auto_close_channel(channel, test_type):
     await asyncio.sleep(duration)
 
     try:
-        # 1. إعادة جلب القناة للتأكد من أنها ما زالت موجودة
+        # 1. إعادة جلب القناة للتأكد من وجودها
         try:
             channel = await bot.fetch_channel(channel.id)
         except discord.NotFound:
             print(f"❌ القناة لم تعد موجودة، تخطي الإغلاق")
             return
 
-        # 2. البحث عن زر "إغلاق" في أول رسالة بوت
-        close_msg = None
-        target_component = None
+        # 2. إرسال كلمة "اغلاق"
+        await channel.send("اغلاق")
+        print(f"💬 تم إرسال 'اغلاق' في {channel.name}")
 
-        async for msg in channel.history(limit=50, oldest_first=True):
-            if msg.components and msg.author.bot:
-                for action_row in msg.components:
-                    for component in action_row.children:
-                        if isinstance(component, discord.Button) and component.label == "إغلاق":
-                            close_msg = msg
-                            target_component = component
-                            break
-                    if target_component:
-                        break
-            if close_msg:
+        # 3. انتظار ظهور رسالة التأكيد (بها زرين: إلغاء / تأكيد ✅)
+        def check(m):
+            if m.channel.id != channel.id:
+                return False
+            if not m.author.bot:
+                return False
+            if not m.components:
+                return False
+            for row in m.components:
+                for c in row.children:
+                    if isinstance(c, discord.Button) and "تأكيد" in c.label:
+                        return True
+            return False
+
+        confirm_msg = None
+        for attempt in range(10):  # نحاول حتى 10 مرات بفاصل 2 ثانية
+            try:
+                confirm_msg = await bot.wait_for('message', timeout=2.0, check=check)
                 break
+            except asyncio.TimeoutError:
+                continue
 
-        if close_msg is None or target_component is None:
-            print(f"❌ لم يتم العثور على زر 'إغلاق' في {channel.name}")
+        if confirm_msg is None:
+            print(f"❌ لم تظهر رسالة تأكيد في {channel.name} بعد 20 ثانية")
             return
 
-        # 3. الضغط على زر "إغلاق"
-        await target_component.click()
-        print(f"🔘 تم الضغط على 'إغلاق' في {channel.name}")
+        # 4. الضغط على زر "تأكيد ✅"
+        for row in confirm_msg.components:
+            for c in row.children:
+                if isinstance(c, discord.Button) and "تأكيد" in c.label:
+                    await c.click()
+                    print(f"✅ تم الضغط على '{c.label}' وإغلاق الروم {channel.name}")
+                    return
 
-        # 4. محاولة الضغط على زر "تأكيد ✅" خلال عدة محاولات
-        for attempt in range(5):
-            await asyncio.sleep(2)  # انتظر قليلاً بين المحاولات
-            try:
-                async for msg in channel.history(limit=5):
-                    if msg.author.bot and msg.components:
-                        for row in msg.components:
-                            for c in row.children:
-                                if isinstance(c, discord.Button) and "تأكيد" in c.label:
-                                    await c.click()
-                                    print(f"✅ تم الضغط على '{c.label}' وإغلاق الروم {channel.name}")
-                                    return
-            except discord.NotFound:
-                print("❌ القناة اختفت أثناء البحث عن زر التأكيد")
-                return
-            except Exception as e:
-                print(f"⚠️ خطأ أثناء البحث عن زر التأكيد: {e}")
-
-        print(f"❌ لم يتم العثور على زر 'تأكيد' في {channel.name} بعد عدة محاولات")
+        print(f"❌ لم يتم العثور على زر تأكيد في رسالة التأكيد")
 
     except Exception as e:
         print(f"❌ فشل إغلاق الروم {channel.name}: {e}")
