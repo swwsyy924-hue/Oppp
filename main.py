@@ -99,7 +99,7 @@ CLOSED_MSG_WHITENING = (
 # رسالة الفشل (عند انتهاء الوقت دون إرسال الرابط)
 FAIL_MSG = (
     "{mention} انتهى وقت الاختبار للأسف 🤷‍♂️.\n"
-    "لقد فشلت في الاختبار. سيتم إغلاق التكت بعد نصف ساعة."
+    "لقد فشلت في الاختبار. سيتم إغلاق التكت بعد ساعة."
 )
 
 # مجموعة القنوات المنتظرة لأول رسالة
@@ -167,7 +167,7 @@ async def monitor_test(channel, test_type, applicant_id, applicant_mention):
             print(f"⏰ انتهى الوقت دون رابط في {channel.name} - إرسال رسالة الفشل")
             fail_text = FAIL_MSG.replace("{mention}", applicant_mention)
             await channel.send(fail_text)
-            await asyncio.sleep(1800)  # انتظر نصف ساعة
+            await asyncio.sleep(3600)  # انتظر ساعة
             await close_ticket(channel)
             return
 
@@ -218,24 +218,55 @@ async def close_ticket(channel):
         print(f"❌ فشل إغلاق الروم {channel.name}: {e}")
 
 async def periodic_reminder(channel_id, applicant_mention, duration, test_type):
-    """يرسل تذكيراً كل ساعة للمُقدّم الذي لم يكتب أي شيء بعد"""
-    interval = 3600  # ثانية (ساعة)
-    elapsed = 0
+    """يرسل تذكيراً عند منتصف الوقت ثم كل ساعة للمُقدّم الذي لم يكتب أي شيء بعد"""
+    # انتظر حتى منتصف المدة
+    half_duration = duration / 2
+    await asyncio.sleep(half_duration)
+
+    # توقف إذا انتهى الاختبار أو أرسل المقدم شيئاً
+    if channel_id in applicant_spoke or channel_id in link_submitted:
+        return
+
+    # حساب الوقت المتبقي بعد المنتصف
+    remaining = duration - half_duration
+    hours = remaining // 3600
+    minutes = (remaining % 3600) // 60
+    if hours > 0:
+        time_str = f"{hours} ساعة"
+        if minutes > 0:
+            time_str += f" و {minutes} دقيقة"
+    else:
+        time_str = f"{minutes} دقيقة"
+
+    # تذكير أنيق بمنتصف الوقت
+    half_reminder = (
+        f"# تنبيه {applicant_mention}\n\n"
+        f"**تبقت لك {time_str} على انتهاء الاختبار**\n\n"
+        "> يرجى الإسراع بتسليم الاختبار قبل انتهاء الوقت.\n\n"
+        "بالتوفيق!"
+    )
+    try:
+        channel = await bot.fetch_channel(channel_id)
+        await channel.send(half_reminder)
+        print(f"🔔 تذكير منتصف الوقت في {channel.name}")
+    except Exception as e:
+        print(f"❌ فشل إرسال تذكير المنتصف: {e}")
+
+    # الآن ابدأ التذكيرات الدورية كل ساعة
+    elapsed = half_duration
+    interval = 3600  # ثانية
     while elapsed < duration:
         await asyncio.sleep(interval)
         elapsed += interval
 
-        # توقف إذا أرسل المقدم رسالة أو رابط
         if channel_id in applicant_spoke or channel_id in link_submitted:
             break
 
-        # جلب القناة الحالية
         try:
             channel = await bot.fetch_channel(channel_id)
         except discord.NotFound:
             break
 
-        # حساب الوقت المتبقي
         remaining = duration - elapsed
         if remaining <= 0:
             break
@@ -243,13 +274,20 @@ async def periodic_reminder(channel_id, applicant_mention, duration, test_type):
         minutes = (remaining % 3600) // 60
         if hours > 0:
             time_str = f"{hours} ساعة"
+            if minutes > 0:
+                time_str += f" و {minutes} دقيقة"
         else:
             time_str = f"{minutes} دقيقة"
 
-        reminder = f"تذكير {applicant_mention}، لم تقم بإرسال أي شيء بعد.\nالوقت المتبقي: {time_str}."
+        reminder = (
+            f"# تنبيه {applicant_mention}\n\n"
+            f"**تبقت لك {time_str} على انتهاء الاختبار**\n\n"
+            "> يرجى الإسراع بتسليم الاختبار قبل انتهاء الوقت.\n\n"
+            "بالتوفيق!"
+        )
         try:
             await channel.send(reminder)
-            print(f"🔔 تذكير في {channel.name}")
+            print(f"🔔 تذكير دوري في {channel.name}")
         except Exception as e:
             print(f"❌ فشل إرسال التذكير: {e}")
 
@@ -307,7 +345,7 @@ async def on_message(message):
         second_msg = None
         third_msg = None
         test_type = None
-        is_open = True  # افتراضي
+        is_open = True
 
         if "التحرير" in embed_text:
             test_type = "edit"
@@ -342,17 +380,17 @@ async def on_message(message):
 
         channel = message.channel
 
-        # ---- إذا كان التقديم مغلقاً: إرسال رسالة واحدة فقط ----
+        # ---- إذا كان التقديم مغلقاً: إرسال رسالة واحدة فقط مع محاكاة كتابة لمدة 3 ثوانٍ ----
         if not is_open:
-            # تأخير عشوائي بسيط
-            delay = random.uniform(1, 2)
-            await asyncio.sleep(delay)
+            # محاكاة كتابة لمدة 3 ثوانٍ بالضبط
             try:
+                async with channel.typing():
+                    await asyncio.sleep(3)
                 await channel.send(closed_msg)
                 print(f"🚫 تم إرسال رسالة الإغلاق في {channel.name}")
             except Exception as e:
                 print(f"❌ فشل إرسال رسالة الإغلاق: {e}")
-            return  # لا شيء آخر
+            return
 
         # ---- التقديم مفتوح: استخراج المقدم ----
         app_user = None
@@ -365,7 +403,7 @@ async def on_message(message):
             all_text = raw_text + " " + embed_text
             mentions = re.findall(r'<@!?(\d+)>', all_text)
             for uid in mentions:
-                if uid != "1503165397585760428":  # تجنب آيدي الرتبة
+                if uid != "1503165397585760428":
                     mention_str = f"<@{uid}>"
                     try:
                         app_user = await bot.fetch_user(int(uid))
@@ -445,8 +483,7 @@ async def on_message(message):
         )
         close_tasks[channel.id] = task
 
-        # بدء مهمة التذكير الدورية (كل ساعة)
-        # نحدد المدة حسب نوع الاختبار
+        # بدء مهمة التذكير الدورية
         if test_type == "edit":
             dur = EDIT_TEST_DURATION_SEC
         elif test_type == "translate":
@@ -463,7 +500,6 @@ async def on_message(message):
 
     # ===== مراقبة رسائل المقدم وروابط النتيجة =====
     if message.channel.id in active_tests:
-        # تسجيل أن المقدم تكلم (إذا كان هو صاحب التكت)
         applicant = applicant_info.get(message.channel.id)
         if applicant and message.author.id == applicant["id"]:
             applicant_spoke.add(message.channel.id)
@@ -475,10 +511,8 @@ async def on_message(message):
         if test_type == "edit" and re.search(r'https?://drive\.google\.com/', content):
             if message.channel.id not in link_submitted:
                 link_submitted.add(message.channel.id)
-                # ألغِ مهمة الإغلاق التلقائي
                 if message.channel.id in close_tasks:
                     close_tasks[message.channel.id].cancel()
-                # ألغِ مهمة التذكير
                 if message.channel.id in reminder_tasks:
                     reminder_tasks[message.channel.id].cancel()
                 await message.channel.send("<@1202583085330333736>")
