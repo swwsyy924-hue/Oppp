@@ -27,6 +27,12 @@ EDIT_TEST_DURATION_SEC = 4 * 3600       # 4 ساعات
 TRANSLATE_TEST_DURATION_SEC = 2 * 3600  # ساعتان
 WHITENING_TEST_DURATION_SEC = 3 * 3600  # 3 ساعات
 
+# مدة إغلاق التكتات المغلقة تلقائياً
+CLOSED_TICKET_CLOSE_DELAY = 900  # 15 دقيقة
+
+# الرابط الثابت لشات المعلومات
+INFO_CHANNEL_LINK = "https://discord.com/channels/1202306392757915688/1202559461433286716"
+
 # الرسائل حسب الكلمة
 FIRST_MSG_EDIT = "اسم اختبار تحرير"
 SECOND_MSG_EDIT = "اختبار تحرير"
@@ -69,31 +75,6 @@ THIRD_MSG_WHITENING = (
     "- التسليم عبر رابط **Google Drive** فقط\n\n"
     "**بالتوفيق!**\n\n"
     "-# ملاحظة: أي سؤال أو استفسار بخصوص الاختبار اسأل في التكت وانتظرني أو انتظر قدوم الإدارة"
-)
-
-# رسائل الإغلاق (عند إغلاق التقديم)
-CLOSED_MSG_EDIT = (
-    "# نعتذر منك 🙏\n\n"
-    "**تقديم اختبار التحرير مغلق حالياً**\n\n"
-    "> نرجو متابعة شات الإنضمام لمعرفة الاخبار الجديدة.\n\n"
-    "إذا كان لديك أي استفسار،اترك رسالتك هنا ليتم الرد عليها من قبل الإدارة.\n"
-    "-# شكراً لتفهمك"
-)
-
-CLOSED_MSG_TRANS = (
-    "# نعتذر منك 🙏\n\n"
-    "**تقديم اختبار الترجمة مغلق حالياً**\n\n"
-    "> نرجو متابعة شات الإنضمام لمعرفة الاخبار الجديدة.\n\n"
-    "إذا كان لديك أي استفسار،اترك رسالتك هنا ليتم الرد عليها من قبل الإدارة.\n"
-    "-# شكراً لتفهمك"
-)
-
-CLOSED_MSG_WHITENING = (
-    "# نعتذر منك 🙏\n\n"
-    "**تقديم اختبار التبييض مغلق حالياً**\n\n"
-    "> نرجو متابعة شات الإنضمام لمعرفة الاخبار الجديدة.\n\n"
-    "إذا كان لديك أي استفسار،اترك رسالتك هنا ليتم الرد عليها من قبل الإدارة.\n"
-    "-# شكراً لتفهمك"
 )
 
 # رسالة الفشل (عند انتهاء الوقت دون إرسال الرابط)
@@ -291,6 +272,21 @@ async def periodic_reminder(channel_id, applicant_mention, duration, test_type):
         except Exception as e:
             print(f"❌ فشل إرسال التذكير: {e}")
 
+async def auto_close_closed_ticket(channel, delay):
+    """تغلق التكت المغلق بعد تأخير محدد (15 دقيقة)"""
+    await asyncio.sleep(delay)
+    try:
+        # إعادة جلب القناة
+        try:
+            channel = await bot.fetch_channel(channel.id)
+        except discord.NotFound:
+            print(f"❌ القناة لم تعد موجودة، تخطي الإغلاق التلقائي للتكت المغلق")
+            return
+        await close_ticket(channel)
+        print(f"🔒 تم إغلاق التكت المغلق {channel.name} تلقائياً بعد 15 دقيقة")
+    except Exception as e:
+        print(f"❌ فشل إغلاق التكت المغلق {channel.name}: {e}")
+
 @bot.event
 async def on_ready():
     print(f"✅ Self-bot يعمل باسم: {bot.user.name} (ID: {bot.user.id})")
@@ -355,7 +351,7 @@ async def on_message(message):
                 second_msg = SECOND_MSG_EDIT
                 third_msg_template = THIRD_MSG_EDIT
             else:
-                closed_msg = CLOSED_MSG_EDIT
+                test_name = "اختبار التحرير"
         elif "الترجمه الانجليزيه" in embed_text:
             test_type = "translate"
             is_open = TRANSLATE_OPEN
@@ -364,7 +360,7 @@ async def on_message(message):
                 second_msg = SECOND_MSG_TRANS
                 third_msg_template = THIRD_MSG_TRANS
             else:
-                closed_msg = CLOSED_MSG_TRANS
+                test_name = "اختبار الترجمة الانجليزية"
         elif "تبييض" in embed_text:
             test_type = "whitening"
             is_open = WHITENING_OPEN
@@ -373,16 +369,40 @@ async def on_message(message):
                 second_msg = SECOND_MSG_WHITENING
                 third_msg_template = THIRD_MSG_WHITENING
             else:
-                closed_msg = CLOSED_MSG_WHITENING
+                test_name = "اختبار التبييض"
         else:
             print(f"❌ أول رسالة في {message.channel.name} لا تحتوي الكلمة المطلوبة في الإيمبد - تم التجاهل")
             return
 
         channel = message.channel
 
-        # ---- إذا كان التقديم مغلقاً: إرسال رسالة واحدة فقط مع محاكاة كتابة لمدة 3 ثوانٍ ----
+        # ---- إذا كان التقديم مغلقاً: إرسال رسالة واحدة فقط مع منشن وإغلاق تلقائي بعد 15 دقيقة ----
         if not is_open:
-            # محاكاة كتابة لمدة 3 ثوانٍ بالضبط
+            # استخراج منشن المقدم
+            applicant_mention = ""
+            if message.mentions:
+                applicant_mention = message.mentions[0].mention
+            else:
+                raw_text = message.content if message.content else ""
+                all_text = raw_text + " " + embed_text
+                mentions = re.findall(r'<@!?(\d+)>', all_text)
+                for uid in mentions:
+                    if uid != "1503165397585760428":
+                        applicant_mention = f"<@{uid}>"
+                        break
+
+            # بناء رسالة الإغلاق
+            closed_msg = (
+                f"# نعتذر منك 🙏\n\n"
+                f"**{applicant_mention}، تقديم {test_name} مغلق حالياً**\n\n"
+                f"> نرجو متابعة شات المعلومات لمعرفة آخر المستجدات:\n"
+                f"> {INFO_CHANNEL_LINK}\n\n"
+                f"- إذا كنت ترغب في التقديم على تخصص آخر **مفتوح**، يمكنك فتح تكت جديد.\n"
+                f"- سيتم إغلاق هذا التكت تلقائياً بعد **15 دقيقة**.\n\n"
+                f"-# شكراً لتفهمك"
+            )
+
+            # محاكاة كتابة لمدة 3 ثوانٍ ثم إرسال
             try:
                 async with channel.typing():
                     await asyncio.sleep(3)
@@ -390,6 +410,12 @@ async def on_message(message):
                 print(f"🚫 تم إرسال رسالة الإغلاق في {channel.name}")
             except Exception as e:
                 print(f"❌ فشل إرسال رسالة الإغلاق: {e}")
+
+            # بدء مهمة إغلاق التكت بعد 15 دقيقة
+            close_task = asyncio.create_task(
+                auto_close_closed_ticket(channel, CLOSED_TICKET_CLOSE_DELAY)
+            )
+            close_tasks[channel.id] = close_task
             return
 
         # ---- التقديم مفتوح: استخراج المقدم ----
