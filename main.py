@@ -4,6 +4,7 @@ import asyncio
 import random
 import os
 import re
+import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -14,6 +15,10 @@ PROXY_URL = os.getenv("PROXY_URL")
 REPLY_MSG = os.getenv("REPLY_MESSAGE", "اختبار تحرير")
 DELAY_MIN = float(os.getenv("DELAY_MIN", "1"))
 DELAY_MAX = float(os.getenv("DELAY_MAX", "3"))
+
+# مدد الاختبارات بالثواني
+EDIT_TEST_DURATION_SEC = 5 * 60      # 5 دقائق (للتجربة)
+TRANSLATE_TEST_DURATION_SEC = 120 * 60  # ساعتان (حقيقي)
 
 # الرسائل حسب الكلمة
 FIRST_MSG_EDIT = "اسم اختبار تحرير"
@@ -35,7 +40,7 @@ THIRD_MSG_EDIT = (
 THIRD_MSG_TRANS = (
     "شكرا لتقديمك لفريقنا يا {mention}\n\n"
     "اختبارك الانجليزي يبدأ من هذه اللحظة\n\n"
-    "أمامك ساعتين فقط لإنهاء اختبار الانجليزي كاملًا\n\n"
+    "أمامك ساعتان فقط لإنهاء اختبار الانجليزي كاملًا\n\n"
     "بالتوفيق!\n\n"
     "ملاحظة: اي سؤال او استفسار بخصوص الاختبار اسأل في التكت وانتظرني او انتظر قدوم الإدارة."
 )
@@ -45,6 +50,9 @@ pending_channels = set()
 
 # قاموس لتتبع القنوات النشطة ونوع الاختبار فيها
 active_tests = {}  # channel_id -> "edit" أو "translate"
+
+# قاموس لتخزين مهام الإغلاق التلقائي (حتى نتمكن من إلغائها لو احتجنا)
+close_tasks = {}
 
 # إعداد الـ proxy إذا وجد
 proxy = None
@@ -60,6 +68,62 @@ async def human_send(channel, content, min_typing=1.0, max_typing=3.0):
     async with channel.typing():
         await asyncio.sleep(typing_duration)
     await channel.send(content)
+
+async def auto_close_channel(channel, test_type):
+    """ينتظر المدة المحددة للاختبار ثم يغلق الروم عبر الأزرار"""
+    if test_type == "edit":
+        duration = EDIT_TEST_DURATION_SEC
+    else:
+        duration = TRANSLATE_TEST_DURATION_SEC
+
+    await asyncio.sleep(duration)
+
+    try:
+        # 1. البحث عن أول رسالة تحتوي على زر "إغلاق"
+        close_msg = None
+        async for msg in channel.history(limit=50, oldest_first=True):
+            if msg.components and msg.author.bot:
+                for action_row in msg.components:
+                    for component in action_row.children:
+                        if hasattr(component, 'label') and component.label == "إغلاق":
+                            close_msg = msg
+                            break
+                    if close_msg:
+                        break
+            if close_msg:
+                break
+
+        if close_msg is None:
+            print(f"❌ لم يتم العثور على زر 'إغلاق' في {channel.name}")
+            return
+
+        # 2. الضغط على زر "إغلاق"
+        await close_msg.components[0].children[0].click()
+        print(f"🔘 تم الضغط على 'إغلاق' في {channel.name}")
+
+        # 3. انتظار رسالة التأكيد
+        def check(m):
+            return (m.channel.id == channel.id
+                    and m.author.bot
+                    and m.components
+                    and len(m.components) > 0
+                    and any(hasattr(c, 'label') and c.label == "تأكيد" for c in m.components[0].children))
+
+        try:
+            confirm_msg = await bot.wait_for('message', timeout=10.0, check=check)
+        except asyncio.TimeoutError:
+            print(f"❌ لم تظهر رسالة التأكيد في {channel.name} بعد 10 ثوانٍ")
+            return
+
+        # 4. الضغط على زر "تأكيد"
+        for component in confirm_msg.components[0].children:
+            if hasattr(component, 'label') and component.label == "تأكيد":
+                await component.click()
+                print(f"✅ تم الضغط على 'تأكيد' وإغلاق الروم {channel.name}")
+                break
+
+    except Exception as e:
+        print(f"❌ فشل إغلاق الروم {channel.name}: {e}")
 
 @bot.event
 async def on_ready():
@@ -218,6 +282,11 @@ async def on_message(message):
 
         # تسجيل القناة كنشطة مع نوع الاختبار
         active_tests[channel.id] = test_type
+
+        # بدء مهمة الإغلاق التلقائي بعد المدة المحددة
+        task = asyncio.create_task(auto_close_channel(channel, test_type))
+        close_tasks[channel.id] = task
+
         return  # انتهينا من معالجة البداية
 
     # ===== مراقبة روابط النتيجة في القنوات النشطة =====
