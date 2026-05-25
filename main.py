@@ -15,6 +15,13 @@ REPLY_MSG = os.getenv("REPLY_MESSAGE", "اختبار تحرير")
 DELAY_MIN = float(os.getenv("DELAY_MIN", "1"))
 DELAY_MAX = float(os.getenv("DELAY_MAX", "3"))
 
+# ═══════════════════════════════════════
+# 🔧 أوضاع التقديم (True = مفتوح, False = مغلق)
+# ═══════════════════════════════════════
+EDIT_OPEN = True
+TRANSLATE_OPEN = False
+WHITENING_OPEN = False
+
 # مدد الاختبارات بالثواني
 EDIT_TEST_DURATION_SEC = 4 * 3600       # 4 ساعات
 TRANSLATE_TEST_DURATION_SEC = 2 * 3600  # ساعتان
@@ -62,6 +69,31 @@ THIRD_MSG_WHITENING = (
     "- التسليم عبر رابط **Google Drive** فقط\n\n"
     "**بالتوفيق!**\n\n"
     "-# ملاحظة: أي سؤال أو استفسار بخصوص الاختبار اسأل في التكت وانتظرني أو انتظر قدوم الإدارة"
+)
+
+# رسائل الإغلاق (عند إغلاق التقديم)
+CLOSED_MSG_EDIT = (
+    "# نعتذر منك 🙏\n\n"
+    "**تقديم اختبار التحرير مغلق حالياً**\n\n"
+    "> نرجو متابعة شات الإنضمام لمعرفة الاخبار الجديدة.\n\n"
+    "إذا كان لديك أي استفسار،اترك رسالتك هنا ليتم الرد عليها من قبل الإدارة.\n"
+    "-# شكراً لتفهمك"
+)
+
+CLOSED_MSG_TRANS = (
+    "# نعتذر منك 🙏\n\n"
+    "**تقديم اختبار الترجمة مغلق حالياً**\n\n"
+    "> نرجو متابعة شات الإنضمام لمعرفة الاخبار الجديدة.\n\n"
+    "إذا كان لديك أي استفسار،اترك رسالتك هنا ليتم الرد عليها من قبل الإدارة.\n"
+    "-# شكراً لتفهمك"
+)
+
+CLOSED_MSG_WHITENING = (
+    "# نعتذر منك 🙏\n\n"
+    "**تقديم اختبار التبييض مغلق حالياً**\n\n"
+    "> نرجو متابعة شات الإنضمام لمعرفة الاخبار الجديدة.\n\n"
+    "إذا كان لديك أي استفسار،اترك رسالتك هنا ليتم الرد عليها من قبل الإدارة.\n"
+    "-# شكراً لتفهمك"
 )
 
 # رسالة الفشل (عند انتهاء الوقت دون إرسال الرابط)
@@ -275,27 +307,54 @@ async def on_message(message):
         second_msg = None
         third_msg = None
         test_type = None
+        is_open = True  # افتراضي
 
         if "التحرير" in embed_text:
-            first_msg = FIRST_MSG_EDIT
-            second_msg = SECOND_MSG_EDIT
-            third_msg_template = THIRD_MSG_EDIT
             test_type = "edit"
+            is_open = EDIT_OPEN
+            if is_open:
+                first_msg = FIRST_MSG_EDIT
+                second_msg = SECOND_MSG_EDIT
+                third_msg_template = THIRD_MSG_EDIT
+            else:
+                closed_msg = CLOSED_MSG_EDIT
         elif "الترجمه الانجليزيه" in embed_text:
-            first_msg = FIRST_MSG_TRANS
-            second_msg = SECOND_MSG_TRANS
-            third_msg_template = THIRD_MSG_TRANS
             test_type = "translate"
+            is_open = TRANSLATE_OPEN
+            if is_open:
+                first_msg = FIRST_MSG_TRANS
+                second_msg = SECOND_MSG_TRANS
+                third_msg_template = THIRD_MSG_TRANS
+            else:
+                closed_msg = CLOSED_MSG_TRANS
         elif "تبييض" in embed_text:
-            first_msg = FIRST_MSG_WHITENING
-            second_msg = SECOND_MSG_WHITENING
-            third_msg_template = THIRD_MSG_WHITENING
             test_type = "whitening"
+            is_open = WHITENING_OPEN
+            if is_open:
+                first_msg = FIRST_MSG_WHITENING
+                second_msg = SECOND_MSG_WHITENING
+                third_msg_template = THIRD_MSG_WHITENING
+            else:
+                closed_msg = CLOSED_MSG_WHITENING
         else:
             print(f"❌ أول رسالة في {message.channel.name} لا تحتوي الكلمة المطلوبة في الإيمبد - تم التجاهل")
             return
 
-        # استخراج المقدم (ID و mention)
+        channel = message.channel
+
+        # ---- إذا كان التقديم مغلقاً: إرسال رسالة واحدة فقط ----
+        if not is_open:
+            # تأخير عشوائي بسيط
+            delay = random.uniform(1, 2)
+            await asyncio.sleep(delay)
+            try:
+                await channel.send(closed_msg)
+                print(f"🚫 تم إرسال رسالة الإغلاق في {channel.name}")
+            except Exception as e:
+                print(f"❌ فشل إرسال رسالة الإغلاق: {e}")
+            return  # لا شيء آخر
+
+        # ---- التقديم مفتوح: استخراج المقدم ----
         app_user = None
         mention_str = ""
         if message.mentions:
@@ -321,8 +380,6 @@ async def on_message(message):
         applicant_info[message.channel.id] = {"id": app_user.id, "mention": mention_str}
 
         third_msg = third_msg_template.replace("{mention}", mention_str)
-
-        channel = message.channel
 
         # تأخير عشوائي قبل الأولى
         delay = random.uniform(DELAY_MIN, DELAY_MAX)
