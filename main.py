@@ -18,14 +18,13 @@ DELAY_MAX = float(os.getenv("DELAY_MAX", "3"))
 # ═══════════════════════════════════════
 # 🔧 أوضاع التقديم (True = مفتوح, False = مغلق)
 # ═══════════════════════════════════════
-EDIT_OPEN = True
-TRANSLATE_OPEN = False
-WHITENING_OPEN = False
+EDIT_WHITENING_OPEN = True   # المسار المدمج (تحرير + تبييض)
+TRANSLATE_OPEN = False       # الترجمة (مستقلة)
 
 # مدد الاختبارات بالثواني
-EDIT_TEST_DURATION_SEC = 4 * 3600       # 4 ساعات
-TRANSLATE_TEST_DURATION_SEC = 2 * 3600  # ساعتان
-WHITENING_TEST_DURATION_SEC = 3 * 3600  # 3 ساعات
+EDIT_TEST_DURATION_SEC = 4 * 3600       # 4 ساعات (مرحلة التحرير)
+TRANSLATE_TEST_DURATION_SEC = 2 * 3600  # ساعتان (الترجمة)
+WHITENING_TEST_DURATION_SEC = 3 * 3600  # 3 ساعات (مرحلة التبييض)
 
 # مدة إغلاق التكتات المغلقة تلقائياً
 CLOSED_TICKET_CLOSE_DELAY = 900  # 15 دقيقة
@@ -87,10 +86,13 @@ FAIL_MSG = (
 pending_channels = set()
 
 # قاموس لتتبع القنوات النشطة ونوع الاختبار ومعلومات المقدم
-active_tests = {}          # channel_id -> "edit" أو "translate" أو "whitening"
+active_tests = {}          # channel_id -> "edit" أو "translate" أو "whitening" أو "combined"
 applicant_info = {}        # channel_id -> {"id": int, "mention": str}
 applicant_spoke = set()    # قنوات أرسل فيها المقدم رسالة واحدة على الأقل
-link_submitted = set()     # قنوات أرسل فيها المقدم رابط الاختبار
+link_submitted = set()     # قنوات أرسل فيها المقدم رابط الاختبار (للمرحلة الحالية)
+
+# قاموس لتخزين المرحلة الحالية للمسار المدمج
+test_phase = {}            # channel_id -> "whitening" أو "edit"
 
 # قاموس لتخزين مهام الإغلاق التلقائي
 close_tasks = {}
@@ -113,15 +115,8 @@ async def human_send(channel, content, min_typing=1.0, max_typing=3.0):
         await asyncio.sleep(typing_duration)
     await channel.send(content)
 
-async def monitor_test(channel, test_type, applicant_id, applicant_mention):
-    """تراقب تقدم الاختبار وتقرر الإغلاق أو إرسال رسالة الفشل"""
-    if test_type == "edit":
-        duration = EDIT_TEST_DURATION_SEC
-    elif test_type == "translate":
-        duration = TRANSLATE_TEST_DURATION_SEC
-    else:
-        duration = WHITENING_TEST_DURATION_SEC
-
+async def monitor_test(channel, duration, applicant_id, applicant_mention):
+    """تراقب تقدم الاختبار بمدة معينة وتقرر الإغلاق أو إرسال رسالة الفشل"""
     await asyncio.sleep(duration)
 
     # إذا أُرسل رابط الاختبار خلال الفترة المسموحة → ألغِ المهمة بهدوء
@@ -198,17 +193,14 @@ async def close_ticket(channel):
     except Exception as e:
         print(f"❌ فشل إغلاق الروم {channel.name}: {e}")
 
-async def periodic_reminder(channel_id, applicant_mention, duration, test_type):
+async def periodic_reminder(channel_id, applicant_mention, duration):
     """يرسل تذكيراً عند منتصف الوقت ثم كل ساعة للمُقدّم الذي لم يكتب أي شيء بعد"""
-    # انتظر حتى منتصف المدة
     half_duration = duration / 2
     await asyncio.sleep(half_duration)
 
-    # توقف إذا انتهى الاختبار أو أرسل المقدم شيئاً
     if channel_id in applicant_spoke or channel_id in link_submitted:
         return
 
-    # حساب الوقت المتبقي بعد المنتصف
     remaining = duration - half_duration
     hours = remaining // 3600
     minutes = (remaining % 3600) // 60
@@ -219,7 +211,6 @@ async def periodic_reminder(channel_id, applicant_mention, duration, test_type):
     else:
         time_str = f"{minutes} دقيقة"
 
-    # تذكير أنيق بمنتصف الوقت
     half_reminder = (
         f"# تنبيه {applicant_mention}\n\n"
         f"**تبقت لك {time_str} على انتهاء الاختبار**\n\n"
@@ -233,9 +224,8 @@ async def periodic_reminder(channel_id, applicant_mention, duration, test_type):
     except Exception as e:
         print(f"❌ فشل إرسال تذكير المنتصف: {e}")
 
-    # الآن ابدأ التذكيرات الدورية كل ساعة
     elapsed = half_duration
-    interval = 3600  # ثانية
+    interval = 3600
     while elapsed < duration:
         await asyncio.sleep(interval)
         elapsed += interval
@@ -276,16 +266,149 @@ async def auto_close_closed_ticket(channel, delay):
     """تغلق التكت المغلق بعد تأخير محدد (15 دقيقة)"""
     await asyncio.sleep(delay)
     try:
-        # إعادة جلب القناة
         try:
             channel = await bot.fetch_channel(channel.id)
         except discord.NotFound:
-            print(f"❌ القناة لم تعد موجودة، تخطي الإغلاق التلقائي للتكت المغلق")
             return
         await close_ticket(channel)
         print(f"🔒 تم إغلاق التكت المغلق {channel.name} تلقائياً بعد 15 دقيقة")
     except Exception as e:
         print(f"❌ فشل إغلاق التكت المغلق {channel.name}: {e}")
+
+# دالة بدء مرحلة التبييض (المدمج)
+async def start_whitening_phase(channel, mention_str):
+    """تبدأ مرحلة التبييض في المسار المدمج"""
+    # إرسال رسائل التبييض
+    first_msg = FIRST_MSG_WHITENING
+    second_msg = SECOND_MSG_WHITENING
+    third_msg = THIRD_MSG_WHITENING.replace("{mention}", mention_str)
+
+    delay = random.uniform(DELAY_MIN, DELAY_MAX)
+    await asyncio.sleep(delay)
+
+    for attempt in range(3):
+        try:
+            await human_send(channel, first_msg)
+            print(f"📨 [تبييض] [{channel.guild.name}] تم الإرسال الأول في {channel.name}")
+            break
+        except discord.errors.HTTPException as e:
+            if e.status == 429:
+                retry_after = e.retry_after
+                await asyncio.sleep(retry_after + 0.5)
+            else:
+                break
+
+    await asyncio.sleep(1)
+
+    for attempt in range(3):
+        try:
+            await human_send(channel, second_msg)
+            print(f"📨2 [تبييض] [{channel.guild.name}] تم الإرسال الثاني في {channel.name}")
+            break
+        except discord.errors.HTTPException as e:
+            if e.status == 429:
+                retry_after = e.retry_after
+                await asyncio.sleep(retry_after + 0.5)
+            else:
+                break
+
+    await asyncio.sleep(2)
+
+    for attempt in range(3):
+        try:
+            async with channel.typing():
+                await asyncio.sleep(5)
+            await channel.send(third_msg)
+            print(f"📨3 [تبييض] [{channel.guild.name}] تم الإرسال الثالث في {channel.name}")
+            break
+        except discord.errors.HTTPException as e:
+            if e.status == 429:
+                retry_after = e.retry_after
+                await asyncio.sleep(retry_after + 0.5)
+            else:
+                break
+
+    # تسجيل المرحلة
+    active_tests[channel.id] = "combined"
+    test_phase[channel.id] = "whitening"
+    # حذف الرابط السابق إن وجد (لبدء جديد)
+    link_submitted.discard(channel.id)
+
+    # مهمة المراقبة والتذكير للتبييض
+    task = asyncio.create_task(
+        monitor_test(channel, WHITENING_TEST_DURATION_SEC, None, mention_str)
+    )
+    close_tasks[channel.id] = task
+    reminder_task = asyncio.create_task(
+        periodic_reminder(channel.id, mention_str, WHITENING_TEST_DURATION_SEC)
+    )
+    reminder_tasks[channel.id] = reminder_task
+
+# دالة بدء مرحلة التحرير (بعد قبول التبييض)
+async def start_edit_phase(channel, mention_str):
+    """تبدأ مرحلة التحرير بعد الأمر"""
+    first_msg = FIRST_MSG_EDIT
+    second_msg = SECOND_MSG_EDIT
+    third_msg = THIRD_MSG_EDIT.replace("{mention}", mention_str)
+
+    delay = random.uniform(DELAY_MIN, DELAY_MAX)
+    await asyncio.sleep(delay)
+
+    for attempt in range(3):
+        try:
+            await human_send(channel, first_msg)
+            print(f"📨 [تحرير] [{channel.guild.name}] تم الإرسال الأول في {channel.name}")
+            break
+        except discord.errors.HTTPException as e:
+            if e.status == 429:
+                retry_after = e.retry_after
+                await asyncio.sleep(retry_after + 0.5)
+            else:
+                break
+
+    await asyncio.sleep(1)
+
+    for attempt in range(3):
+        try:
+            await human_send(channel, second_msg)
+            print(f"📨2 [تحرير] [{channel.guild.name}] تم الإرسال الثاني في {channel.name}")
+            break
+        except discord.errors.HTTPException as e:
+            if e.status == 429:
+                retry_after = e.retry_after
+                await asyncio.sleep(retry_after + 0.5)
+            else:
+                break
+
+    await asyncio.sleep(2)
+
+    for attempt in range(3):
+        try:
+            async with channel.typing():
+                await asyncio.sleep(5)
+            await channel.send(third_msg)
+            print(f"📨3 [تحرير] [{channel.guild.name}] تم الإرسال الثالث في {channel.name}")
+            break
+        except discord.errors.HTTPException as e:
+            if e.status == 429:
+                retry_after = e.retry_after
+                await asyncio.sleep(retry_after + 0.5)
+            else:
+                break
+
+    # تحديث المرحلة
+    test_phase[channel.id] = "edit"
+    link_submitted.discard(channel.id)  # نجهز لاستقبال رابط التحرير
+
+    # مهام المراقبة والتذكير للتحرير
+    task = asyncio.create_task(
+        monitor_test(channel, EDIT_TEST_DURATION_SEC, None, mention_str)
+    )
+    close_tasks[channel.id] = task
+    reminder_task = asyncio.create_task(
+        periodic_reminder(channel.id, mention_str, EDIT_TEST_DURATION_SEC)
+    )
+    reminder_tasks[channel.id] = reminder_task
 
 @bot.event
 async def on_ready():
@@ -342,16 +465,20 @@ async def on_message(message):
         third_msg = None
         test_type = None
         is_open = True
+        is_combined = False
 
-        if "التحرير" in embed_text:
-            test_type = "edit"
-            is_open = EDIT_OPEN
+        # تعديل الاكتشاف ليشمل المسار المدمج
+        if "التحرير" in embed_text or "تبييض" in embed_text:
+            # المسار المدمج (تحرير + تبييض)
+            is_combined = True
+            is_open = EDIT_WHITENING_OPEN
+            test_name = "اختبار تحرير + تبييض"
             if is_open:
-                first_msg = FIRST_MSG_EDIT
-                second_msg = SECOND_MSG_EDIT
-                third_msg_template = THIRD_MSG_EDIT
+                # سنبدأ بالتبييض لاحقًا
+                pass
             else:
-                test_name = "اختبار التحرير"
+                # رسالة الإغلاق ستُبنى لاحقًا
+                pass
         elif "الترجمه الانجليزيه" in embed_text:
             test_type = "translate"
             is_open = TRANSLATE_OPEN
@@ -361,76 +488,25 @@ async def on_message(message):
                 third_msg_template = THIRD_MSG_TRANS
             else:
                 test_name = "اختبار الترجمة الانجليزية"
-        elif "تبييض" in embed_text:
-            test_type = "whitening"
-            is_open = WHITENING_OPEN
-            if is_open:
-                first_msg = FIRST_MSG_WHITENING
-                second_msg = SECOND_MSG_WHITENING
-                third_msg_template = THIRD_MSG_WHITENING
-            else:
-                test_name = "اختبار التبييض"
         else:
             print(f"❌ أول رسالة في {message.channel.name} لا تحتوي الكلمة المطلوبة في الإيمبد - تم التجاهل")
             return
 
         channel = message.channel
 
-        # ---- إذا كان التقديم مغلقاً: إرسال رسالة واحدة فقط مع منشن وإغلاق تلقائي بعد 15 دقيقة ----
-        if not is_open:
-            # استخراج منشن المقدم
-            applicant_mention = ""
-            if message.mentions:
-                applicant_mention = message.mentions[0].mention
-            else:
-                raw_text = message.content if message.content else ""
-                all_text = raw_text + " " + embed_text
-                mentions = re.findall(r'<@!?(\d+)>', all_text)
-                for uid in mentions:
-                    if uid != "1503165397585760428":
-                        applicant_mention = f"<@{uid}>"
-                        break
-
-            # بناء رسالة الإغلاق
-            closed_msg = (
-                f"# نعتذر منك 🙏\n\n"
-                f"**{applicant_mention}، تقديم {test_name} مغلق حالياً**\n\n"
-                f"> نرجو متابعة شات المعلومات لمعرفة آخر المستجدات:\n"
-                f"> {INFO_CHANNEL_LINK}\n\n"
-                f"- إذا كنت ترغب في التقديم على تخصص آخر **مفتوح**، يمكنك فتح تكت جديد.\n"
-                f"- سيتم إغلاق هذا التكت تلقائياً بعد **15 دقيقة**.\n\n"
-                f"-# شكراً لتفهمك"
-            )
-
-            # محاكاة كتابة لمدة 3 ثوانٍ ثم إرسال
-            try:
-                async with channel.typing():
-                    await asyncio.sleep(3)
-                await channel.send(closed_msg)
-                print(f"🚫 تم إرسال رسالة الإغلاق في {channel.name}")
-            except Exception as e:
-                print(f"❌ فشل إرسال رسالة الإغلاق: {e}")
-
-            # بدء مهمة إغلاق التكت بعد 15 دقيقة
-            close_task = asyncio.create_task(
-                auto_close_closed_ticket(channel, CLOSED_TICKET_CLOSE_DELAY)
-            )
-            close_tasks[channel.id] = close_task
-            return
-
-        # ---- التقديم مفتوح: استخراج المقدم ----
+        # ---- استخراج المقدم ----
+        applicant_mention = ""
         app_user = None
-        mention_str = ""
         if message.mentions:
             app_user = message.mentions[0]
-            mention_str = app_user.mention
+            applicant_mention = app_user.mention
         else:
             raw_text = message.content if message.content else ""
             all_text = raw_text + " " + embed_text
             mentions = re.findall(r'<@!?(\d+)>', all_text)
             for uid in mentions:
                 if uid != "1503165397585760428":
-                    mention_str = f"<@{uid}>"
+                    applicant_mention = f"<@{uid}>"
                     try:
                         app_user = await bot.fetch_user(int(uid))
                     except:
@@ -441,90 +517,99 @@ async def on_message(message):
             print(f"❌ لم يتم العثور على المقدم في {message.channel.name}")
             return
 
-        applicant_info[message.channel.id] = {"id": app_user.id, "mention": mention_str}
+        applicant_info[channel.id] = {"id": app_user.id, "mention": applicant_mention}
 
-        third_msg = third_msg_template.replace("{mention}", mention_str)
-
-        # تأخير عشوائي قبل الأولى
-        delay = random.uniform(DELAY_MIN, DELAY_MAX)
-        await asyncio.sleep(delay)
-
-        # الرسالة الأولى
-        for attempt in range(3):
-            try:
-                await human_send(channel, first_msg)
-                print(f"📨 [{channel.guild.name}] تم الإرسال الأول في {channel.name}")
-                break
-            except discord.errors.HTTPException as e:
-                if e.status == 429:
-                    retry_after = e.retry_after
-                    print(f"⏳ Rate limit، انتظر {retry_after} ثانية...")
-                    await asyncio.sleep(retry_after + 0.5)
-                else:
-                    print(f"❌ فشل الإرسال الأول: {e}")
-                    break
-
-        # انتظار ثانية واحدة فقط بين الأولى والثانية
-        await asyncio.sleep(1)
-
-        # الرسالة الثانية
-        for attempt in range(3):
-            try:
-                await human_send(channel, second_msg)
-                print(f"📨2 [{channel.guild.name}] تم الإرسال الثاني في {channel.name}")
-                break
-            except discord.errors.HTTPException as e:
-                if e.status == 429:
-                    retry_after = e.retry_after
-                    print(f"⏳ Rate limit للرسالة الثانية، انتظر {retry_after} ثانية...")
-                    await asyncio.sleep(retry_after + 0.5)
-                else:
-                    print(f"❌ فشل الإرسال الثاني: {e}")
-                    break
-
-        # انتظار ثانيتين ثم 5 ثوانٍ كتابة للرسالة الثالثة
-        await asyncio.sleep(2)
-
-        for attempt in range(3):
+        # ---- إذا كان التقديم مغلقاً (عام) ----
+        if not is_open:
+            closed_msg = (
+                f"# نعتذر منك 🙏\n\n"
+                f"**{applicant_mention}، تقديم {test_name} مغلق حالياً**\n\n"
+                f"> نرجو متابعة شات المعلومات لمعرفة آخر المستجدات:\n"
+                f"> {INFO_CHANNEL_LINK}\n\n"
+                f"- إذا كنت ترغب في التقديم على تخصص آخر **مفتوح**، يمكنك فتح تكت جديد.\n"
+                f"- سيتم إغلاق هذا التكت تلقائياً بعد **15 دقيقة**.\n\n"
+                f"-# شكراً لتفهمك"
+            )
             try:
                 async with channel.typing():
-                    await asyncio.sleep(5)
-                await channel.send(third_msg)
-                print(f"📨3 [{channel.guild.name}] تم الإرسال الثالث في {channel.name}")
-                break
-            except discord.errors.HTTPException as e:
-                if e.status == 429:
-                    retry_after = e.retry_after
-                    print(f"⏳ Rate limit للرسالة الثالثة، انتظر {retry_after} ثانية...")
-                    await asyncio.sleep(retry_after + 0.5)
-                else:
-                    print(f"❌ فشل الإرسال الثالث: {e}")
-                    break
+                    await asyncio.sleep(3)
+                await channel.send(closed_msg)
+                print(f"🚫 تم إرسال رسالة الإغلاق في {channel.name}")
+            except Exception as e:
+                print(f"❌ فشل إرسال رسالة الإغلاق: {e}")
 
-        active_tests[channel.id] = test_type
+            close_task = asyncio.create_task(
+                auto_close_closed_ticket(channel, CLOSED_TICKET_CLOSE_DELAY)
+            )
+            close_tasks[channel.id] = close_task
+            return
 
-        # بدء مهمة المراقبة
-        task = asyncio.create_task(
-            monitor_test(channel, test_type, app_user.id, mention_str)
-        )
-        close_tasks[channel.id] = task
-
-        # بدء مهمة التذكير الدورية
-        if test_type == "edit":
-            dur = EDIT_TEST_DURATION_SEC
-        elif test_type == "translate":
-            dur = TRANSLATE_TEST_DURATION_SEC
+        # ---- التقديم مفتوح ----
+        if is_combined:
+            # بدء مرحلة التبييض فوراً
+            await start_whitening_phase(channel, applicant_mention)
         else:
-            dur = WHITENING_TEST_DURATION_SEC
+            # اختبار منفرد (ترجمة)
+            third_msg = third_msg_template.replace("{mention}", applicant_mention)
 
-        reminder_task = asyncio.create_task(
-            periodic_reminder(channel.id, mention_str, dur, test_type)
-        )
-        reminder_tasks[channel.id] = reminder_task
+            delay = random.uniform(DELAY_MIN, DELAY_MAX)
+            await asyncio.sleep(delay)
+
+            for attempt in range(3):
+                try:
+                    await human_send(channel, first_msg)
+                    print(f"📨 [{channel.guild.name}] تم الإرسال الأول في {channel.name}")
+                    break
+                except discord.errors.HTTPException as e:
+                    if e.status == 429:
+                        retry_after = e.retry_after
+                        await asyncio.sleep(retry_after + 0.5)
+                    else:
+                        break
+
+            await asyncio.sleep(1)
+
+            for attempt in range(3):
+                try:
+                    await human_send(channel, second_msg)
+                    print(f"📨2 [{channel.guild.name}] تم الإرسال الثاني في {channel.name}")
+                    break
+                except discord.errors.HTTPException as e:
+                    if e.status == 429:
+                        retry_after = e.retry_after
+                        await asyncio.sleep(retry_after + 0.5)
+                    else:
+                        break
+
+            await asyncio.sleep(2)
+
+            for attempt in range(3):
+                try:
+                    async with channel.typing():
+                        await asyncio.sleep(5)
+                    await channel.send(third_msg)
+                    print(f"📨3 [{channel.guild.name}] تم الإرسال الثالث في {channel.name}")
+                    break
+                except discord.errors.HTTPException as e:
+                    if e.status == 429:
+                        retry_after = e.retry_after
+                        await asyncio.sleep(retry_after + 0.5)
+                    else:
+                        break
+
+            active_tests[channel.id] = test_type
+            task = asyncio.create_task(
+                monitor_test(channel, TRANSLATE_TEST_DURATION_SEC, app_user.id, applicant_mention)
+            )
+            close_tasks[channel.id] = task
+            reminder_task = asyncio.create_task(
+                periodic_reminder(channel.id, applicant_mention, TRANSLATE_TEST_DURATION_SEC)
+            )
+            reminder_tasks[channel.id] = reminder_task
 
         return
 
-    # ===== مراقبة رسائل المقدم وروابط النتيجة =====
+    # ===== مراقبة رسائل المقدم وروابط النتيجة + أوامر المشرفين =====
     if message.channel.id in active_tests:
         applicant = applicant_info.get(message.channel.id)
         if applicant and message.author.id == applicant["id"]:
@@ -533,19 +618,52 @@ async def on_message(message):
         test_type = active_tests[message.channel.id]
         content = message.content
 
-        # تحقق من رابط درايف قوقل (للتحرير)
-        if test_type == "edit" and re.search(r'https?://drive\.google\.com/', content):
-            if message.channel.id not in link_submitted:
-                link_submitted.add(message.channel.id)
+        # --- التعامل مع المسار المدمج ---
+        if test_type == "combined":
+            phase = test_phase.get(message.channel.id)
+            # الأمر "اكمل <@930731511081213963>" للانتقال للتحرير
+            if (phase == "whitening" 
+                and "اكمل" in content 
+                and "<@930731511081213963>" in content):
+                # تحقق من أن المقدم قد سلم رابط التبييض
+                if message.channel.id not in link_submitted:
+                    await message.channel.send("يرجى انتظار تسليم المتقدم لرابط التبييض أولاً.")
+                    return
+                # إلغاء مهام المرحلة السابقة
                 if message.channel.id in close_tasks:
                     close_tasks[message.channel.id].cancel()
                 if message.channel.id in reminder_tasks:
                     reminder_tasks[message.channel.id].cancel()
-                await message.channel.send("<@1202583085330333736>")
-                print(f"🔔 تم منشن مشرف التحرير في {message.channel.name} - تم إلغاء الإغلاق التلقائي")
+                # بدء مرحلة التحرير
+                await start_edit_phase(message.channel, applicant["mention"])
+                return
 
-        # تحقق من رابط مستندات قوقل (للترجمة)
-        elif test_type == "translate" and re.search(r'https?://docs\.google\.com/', content):
+            # رابط درايف أثناء مرحلة التبييض
+            if phase == "whitening" and re.search(r'https?://drive\.google\.com/', content):
+                if message.channel.id not in link_submitted:
+                    link_submitted.add(message.channel.id)
+                    if message.channel.id in close_tasks:
+                        close_tasks[message.channel.id].cancel()
+                    if message.channel.id in reminder_tasks:
+                        reminder_tasks[message.channel.id].cancel()
+                    await message.channel.send("<@1334530342899421287>")
+                    print(f"🔔 [تبييض] تم منشن المشرف في {message.channel.name}")
+                return
+
+            # رابط درايف أثناء مرحلة التحرير
+            if phase == "edit" and re.search(r'https?://drive\.google\.com/', content):
+                if message.channel.id not in link_submitted:
+                    link_submitted.add(message.channel.id)
+                    if message.channel.id in close_tasks:
+                        close_tasks[message.channel.id].cancel()
+                    if message.channel.id in reminder_tasks:
+                        reminder_tasks[message.channel.id].cancel()
+                    await message.channel.send("<@1202583085330333736>")
+                    print(f"🔔 [تحرير] تم منشن المشرف في {message.channel.name}")
+                return
+
+        # --- الاختبارات المستقلة (ترجمة) ---
+        if test_type == "translate" and re.search(r'https?://docs\.google\.com/', content):
             if message.channel.id not in link_submitted:
                 link_submitted.add(message.channel.id)
                 if message.channel.id in close_tasks:
@@ -553,18 +671,7 @@ async def on_message(message):
                 if message.channel.id in reminder_tasks:
                     reminder_tasks[message.channel.id].cancel()
                 await message.channel.send("<@1216084628453200015>")
-                print(f"🔔 تم منشن مشرف الترجمة في {message.channel.name} - تم إلغاء الإغلاق التلقائي")
-
-        # تحقق من رابط درايف قوقل (للتبييض)
-        elif test_type == "whitening" and re.search(r'https?://drive\.google\.com/', content):
-            if message.channel.id not in link_submitted:
-                link_submitted.add(message.channel.id)
-                if message.channel.id in close_tasks:
-                    close_tasks[message.channel.id].cancel()
-                if message.channel.id in reminder_tasks:
-                    reminder_tasks[message.channel.id].cancel()
-                await message.channel.send("<@1334530342899421287>")
-                print(f"🔔 تم منشن مشرف التبييض في {message.channel.name} - تم إلغاء الإغلاق التلقائي")
+                print(f"🔔 تم منشن مشرف الترجمة في {message.channel.name}")
 
 @bot.event
 async def on_command_error(ctx, error):
