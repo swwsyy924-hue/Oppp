@@ -122,6 +122,36 @@ async def human_send_smart(channel, content):
         await asyncio.sleep(duration)
     await channel.send(content)
 
+# --- دالة استخراج الرابط من النص أو الإيمبدات (تغطي الحالتين) ---
+def extract_link(message, pattern):
+    """
+    يحاول إيجاد رابط يطابق النمط في محتوى الرسالة أو في أي إيمبد مرفق.
+    يعيد الرابط كسلسة إذا وُجد، وإلا None.
+    """
+    # أولاً نبحث في النص الخام
+    if message.content:
+        match = re.search(pattern, message.content)
+        if match:
+            return match.group(0)
+    # ثم نبحث في embeds (مثلاً إذا أُرسل الرابط وحده وأصبح embed)
+    for embed in message.embeds:
+        # قد يكون الرابط في عنوان أو وصف أو حقل URL
+        for attr in ('title', 'description', 'url'):
+            val = getattr(embed, attr, None)
+            if val and isinstance(val, str):
+                match = re.search(pattern, val)
+                if match:
+                    return match.group(0)
+        # فحص الحقول
+        for field in embed.fields:
+            for sub_attr in ('name', 'value'):
+                val = getattr(field, sub_attr, None)
+                if val and isinstance(val, str):
+                    match = re.search(pattern, val)
+                    if match:
+                        return match.group(0)
+    return None
+
 async def monitor_test(channel, duration, applicant_id, applicant_mention):
     """تراقب تقدم الاختبار بمدة معينة وتقرر الإغلاق أو إرسال رسالة الفشل"""
     await asyncio.sleep(duration)
@@ -218,7 +248,6 @@ async def periodic_reminder(channel_id, applicant_mention, duration):
     else:
         time_str = f"{minutes} دقيقة"
 
-    # تم توحيد التذكير هنا ليطابق باقي التذكيرات
     half_reminder = (
         f"# تنبيه {applicant_mention}\n\n"
         f"**بقت لك {time_str} حتى ينتهي الاختبار**\n\n"
@@ -290,31 +319,25 @@ async def start_whitening_phase(channel, mention_str):
     second_msg = SECOND_MSG_WHITENING
     third_msg = THIRD_MSG_WHITENING.replace("{mention}", mention_str)
 
-    # تأخير عشوائي بسيط قبل البدء
     await asyncio.sleep(random.uniform(1.0, 2.0))
 
-    # إرسال الرسالة الأولى (الاسم)
     await human_send_smart(channel, first_msg)
     print(f"📨 [تبييض] [{channel.guild.name}] تم الإرسال الأول في {channel.name}")
 
     await asyncio.sleep(1)
 
-    # إرسال الرسالة الثانية
     await human_send_smart(channel, second_msg)
     print(f"📨2 [تبييض] [{channel.guild.name}] تم الإرسال الثاني في {channel.name}")
 
     await asyncio.sleep(2)
 
-    # إرسال الرسالة الثالثة (الطويلة)
     await human_send_smart(channel, third_msg)
     print(f"📨3 [تبييض] [{channel.guild.name}] تم الإرسال الثالث في {channel.name}")
 
-    # تسجيل المرحلة
     active_tests[channel.id] = "combined"
     test_phase[channel.id] = "whitening"
     link_submitted.discard(channel.id)
 
-    # مهمة المراقبة والتذكير للتبييض
     task = asyncio.create_task(
         monitor_test(channel, WHITENING_TEST_DURATION_SEC, None, mention_str)
     )
@@ -330,24 +353,19 @@ async def start_edit_phase(channel, mention_str):
     second_msg = SECOND_MSG_EDIT
     third_msg = THIRD_MSG_EDIT.replace("{mention}", mention_str)
 
-    # تأخير بسيط
     await asyncio.sleep(1.5)
 
-    # إرسال الرسالة الثانية مباشرة (اختبار تحرير)
     await human_send_smart(channel, second_msg)
     print(f"📨2 [تحرير] [{channel.guild.name}] تم الإرسال الثاني في {channel.name}")
 
     await asyncio.sleep(2)
 
-    # إرسال الرسالة الثالثة (التعليمات الكاملة)
     await human_send_smart(channel, third_msg)
     print(f"📨3 [تحرير] [{channel.guild.name}] تم الإرسال الثالث في {channel.name}")
 
-    # تحديث المرحلة
     test_phase[channel.id] = "edit"
     link_submitted.discard(channel.id)
 
-    # مهام المراقبة والتذكير للتحرير
     task = asyncio.create_task(
         monitor_test(channel, EDIT_TEST_DURATION_SEC, None, mention_str)
     )
@@ -522,7 +540,6 @@ async def on_message(message):
                 if message.channel.id not in link_submitted:
                     await message.channel.send(" انتظر بالبداية يسلم اختبار التبييض وعود اكمل")
                     return
-                # إلغاء مهام المرحلة السابقة
                 if message.channel.id in close_tasks:
                     close_tasks[message.channel.id].cancel()
                 if message.channel.id in reminder_tasks:
@@ -530,9 +547,10 @@ async def on_message(message):
                 await start_edit_phase(message.channel, applicant["mention"])
                 return
 
-            # رابط درايف - تبييض (يتم استخراج الرابط حتى لو كان مرفقاً مع نص آخر)
-            if phase == "whitening" and re.search(r'https?://drive\.google\.com/', content):
-                if message.channel.id not in link_submitted:
+            # رابط درايف - تبييض (يغطي الرابط بمفرده أو مع نص)
+            if phase == "whitening":
+                extracted = extract_link(message, r'https?://drive\.google\.com/[^\s]+')
+                if extracted and message.channel.id not in link_submitted:
                     link_submitted.add(message.channel.id)
                     if message.channel.id in close_tasks:
                         close_tasks[message.channel.id].cancel()
@@ -540,11 +558,12 @@ async def on_message(message):
                         reminder_tasks[message.channel.id].cancel()
                     await message.channel.send("<@1334530342899421287>")
                     print(f"🔔 [تبييض] تم منشن المشرف في {message.channel.name}")
-                return
+                    return
 
-            # رابط درايف - تحرير (يتم استخراج الرابط حتى لو كان مرفقاً مع نص آخر)
-            if phase == "edit" and re.search(r'https?://drive\.google\.com/', content):
-                if message.channel.id not in link_submitted:
+            # رابط درايف - تحرير
+            if phase == "edit":
+                extracted = extract_link(message, r'https?://drive\.google\.com/[^\s]+')
+                if extracted and message.channel.id not in link_submitted:
                     link_submitted.add(message.channel.id)
                     if message.channel.id in close_tasks:
                         close_tasks[message.channel.id].cancel()
@@ -552,11 +571,12 @@ async def on_message(message):
                         reminder_tasks[message.channel.id].cancel()
                     await message.channel.send("<@1202583085330333736>")
                     print(f"🔔 [تحرير] تم منشن المشرف في {message.channel.name}")
-                return
+                    return
 
         # --- الاختبارات المستقلة (ترجمة) ---
-        if test_type == "translate" and re.search(r'https?://docs\.google\.com/', content):
-            if message.channel.id not in link_submitted:
+        if test_type == "translate":
+            extracted = extract_link(message, r'https?://docs\.google\.com/[^\s]+')
+            if extracted and message.channel.id not in link_submitted:
                 link_submitted.add(message.channel.id)
                 if message.channel.id in close_tasks:
                     close_tasks[message.channel.id].cancel()
