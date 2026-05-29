@@ -376,6 +376,8 @@ async def start_edit_phase(channel, mention_str):
     )
     reminder_tasks[channel.id] = reminder_task
 
+# ... (كل ما سبق من import وإعدادات ودوال مساعدة يبقى كما هو دون تغيير)
+
 # ═══════════════════════════════════════
 # 🎮 معالجة أوامر التحكم عن بعد
 # ═══════════════════════════════════════
@@ -391,42 +393,52 @@ async def process_control_command(message):
         # --- فتح / إغلاق التخصصات ---
         if cmd == "!open_edit":
             EDIT_WHITENING_OPEN = True
-            await message.channel.send("✅ تم فتح تقديم تحرير + تبييض")
+            await message.channel.send("✅ **تحرير + تبييض:** تم فتح التقديم.")
         elif cmd == "!close_edit":
             EDIT_WHITENING_OPEN = False
-            await message.channel.send("✅ تم إغلاق تقديم تحرير + تبييض")
+            await message.channel.send("🔒 **تحرير + تبييض:** تم إغلاق التقديم.")
         elif cmd == "!open_translate":
             TRANSLATE_OPEN = True
-            await message.channel.send("✅ تم فتح تقديم الترجمة")
+            await message.channel.send("✅ **ترجمة:** تم فتح التقديم.")
         elif cmd == "!close_translate":
             TRANSLATE_OPEN = False
-            await message.channel.send("✅ تم إغلاق تقديم الترجمة")
+            await message.channel.send("🔒 **ترجمة:** تم إغلاق التقديم.")
         elif cmd == "!toggle_edit":
             EDIT_WHITENING_OPEN = not EDIT_WHITENING_OPEN
-            await message.channel.send(f"✅ أصبح تحرير + تبييض: {'مفتوح' if EDIT_WHITENING_OPEN else 'مغلق'}")
+            state = "مفتوح" if EDIT_WHITENING_OPEN else "مغلق"
+            await message.channel.send(f"🔄 **تحرير + تبييض:** أصبح {state}.")
         elif cmd == "!toggle_translate":
             TRANSLATE_OPEN = not TRANSLATE_OPEN
-            await message.channel.send(f"✅ أصبحت الترجمة: {'مفتوح' if TRANSLATE_OPEN else 'مغلق'}")
+            state = "مفتوح" if TRANSLATE_OPEN else "مغلق"
+            await message.channel.send(f"🔄 **ترجمة:** أصبحت {state}.")
 
         # --- عرض الحالة ---
         elif cmd == "!status":
-            edit = "مفتوح" if EDIT_WHITENING_OPEN else "مغلق"
-            trans = "مفتوح" if TRANSLATE_OPEN else "مغلق"
+            edit_icon = "🟢" if EDIT_WHITENING_OPEN else "🔴"
+            trans_icon = "🟢" if TRANSLATE_OPEN else "🔴"
             active = len(active_tests)
-            txt = f"**تحرير + تبييض:** {edit}\n**ترجمة:** {trans}\n**تكتات نشطة:** {active}"
-            await message.channel.send(txt)
+            embed = discord.Embed(title="📊 حالة النظام", color=0x00ff00 if active == 0 else 0xffaa00)
+            embed.add_field(name=f"{edit_icon} تحرير + تبييض", value="مفتوح" if EDIT_WHITENING_OPEN else "مغلق", inline=True)
+            embed.add_field(name=f"{trans_icon} ترجمة", value="مفتوح" if TRANSLATE_OPEN else "مغلق", inline=True)
+            embed.add_field(name="📁 تكتات نشطة", value=str(active), inline=False)
+            await message.channel.send(embed=embed)
 
         # --- عرض التكتات النشطة ---
         elif cmd == "!list_active":
             if not active_tests:
-                await message.channel.send("لا توجد تكتات نشطة.")
+                await message.channel.send("ℹ️ لا توجد تكتات نشطة حاليًا.")
             else:
                 lines = []
-                for ch_id, ttype in active_tests.items():
+                for idx, (ch_id, ttype) in enumerate(active_tests.items(), 1):
                     ment = applicant_info.get(ch_id, {}).get("mention", "غير معروف")
                     phase = test_phase.get(ch_id, "-")
-                    lines.append(f"<#{ch_id}> | {ment} | {ttype} | مرحلة: {phase}")
-                await message.channel.send("\n".join(lines))
+                    if ttype == "combined":
+                        phase_name = "تبييض" if phase == "whitening" else "تحرير"
+                        ttype_display = f"تحرير+تبييض ({phase_name})"
+                    else:
+                        ttype_display = "ترجمة"
+                    lines.append(f"{idx}. <#{ch_id}> | {ment} | {ttype_display}")
+                await message.channel.send("**📋 التكتات النشطة:**\n" + "\n".join(lines))
 
         # --- إغلاق تكت محدد ---
         elif cmd == "!force_close":
@@ -434,7 +446,9 @@ async def process_control_command(message):
                 ch_id = int(args[0])
                 ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
                 await close_ticket(ch)
-                await message.channel.send(f"✅ جارٍ إغلاق {ch.name}")
+                await message.channel.send(f"🗑️ جارٍ إغلاق تكت {ch.name}.")
+            else:
+                await message.channel.send("❗ استخدم `!force_close <معرف القناة>`")
 
         # --- إرسال فشل لتكت محدد ---
         elif cmd == "!force_fail":
@@ -443,7 +457,9 @@ async def process_control_command(message):
                 ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
                 mention = applicant_info.get(ch_id, {}).get("mention", "")
                 await human_send_smart(ch, FAIL_MSG.replace("{mention}", mention))
-                await message.channel.send(f"✅ تم إرسال الفشل لـ {ch.name}")
+                await message.channel.send(f"⛔ تم إرسال إشعار الفشل لتكت {ch.name}.")
+            else:
+                await message.channel.send("❗ استخدم `!force_fail <معرف القناة>`")
 
         # --- نقل المسار المدمج للمرحلة التالية ---
         elif cmd == "!force_next":
@@ -453,9 +469,11 @@ async def process_control_command(message):
                     mention = applicant_info.get(ch_id, {}).get("mention", "")
                     ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
                     await start_edit_phase(ch, mention)
-                    await message.channel.send("✅ انتقل لمرحلة التحرير")
+                    await message.channel.send(f"⏭️ تم نقل تكت {ch.name} إلى مرحلة التحرير.")
                 else:
-                    await message.channel.send("❌ التكت ليس في مرحلة التبييض")
+                    await message.channel.send("❌ التكت ليس في مرحلة التبييض.")
+            else:
+                await message.channel.send("❗ استخدم `!force_next <معرف القناة>`")
 
         # --- تذكير فوري ---
         elif cmd == "!remind":
@@ -464,30 +482,53 @@ async def process_control_command(message):
                 mention = applicant_info.get(ch_id, {}).get("mention", "")
                 ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
                 await human_send_smart(ch, f"# تذكير {mention}\n\nيرجى تسليم الاختبار قبل انتهاء الوقت.")
-                await message.channel.send(f"✅ تم إرسال تذكير لـ {ch.name}")
+                await message.channel.send(f"🔔 تم إرسال تذكير في تكت {ch.name}.")
+            else:
+                await message.channel.send("❗ استخدم `!remind <معرف القناة>`")
 
         # --- ضبط المدد ---
         elif cmd == "!set_edit_time":
-            if args: EDIT_TEST_DURATION_SEC = int(args[0]) * 3600; await message.channel.send("✅ تم")
+            if args:
+                EDIT_TEST_DURATION_SEC = int(args[0]) * 3600
+                await message.channel.send(f"⏱️ مدة التحرير أصبحت **{args[0]}** ساعة.")
+            else:
+                await message.channel.send("❗ استخدم `!set_edit_time <عدد الساعات>`")
         elif cmd == "!set_whitening_time":
-            if args: WHITENING_TEST_DURATION_SEC = int(args[0]) * 3600; await message.channel.send("✅ تم")
+            if args:
+                WHITENING_TEST_DURATION_SEC = int(args[0]) * 3600
+                await message.channel.send(f"⏱️ مدة التبييض أصبحت **{args[0]}** ساعة.")
+            else:
+                await message.channel.send("❗ استخدم `!set_whitening_time <عدد الساعات>`")
         elif cmd == "!set_translate_time":
-            if args: TRANSLATE_TEST_DURATION_SEC = int(args[0]) * 3600; await message.channel.send("✅ تم")
+            if args:
+                TRANSLATE_TEST_DURATION_SEC = int(args[0]) * 3600
+                await message.channel.send(f"⏱️ مدة الترجمة أصبحت **{args[0]}** ساعة.")
+            else:
+                await message.channel.send("❗ استخدم `!set_translate_time <عدد الساعات>`")
         elif cmd == "!set_close_delay":
-            if args: CLOSED_TICKET_CLOSE_DELAY = int(args[0]) * 60; await message.channel.send("✅ تم")
+            if args:
+                CLOSED_TICKET_CLOSE_DELAY = int(args[0]) * 60
+                await message.channel.send(f"⏲️ تأخير الإغلاق أصبح **{args[0]}** دقيقة.")
+            else:
+                await message.channel.send("❗ استخدم `!set_close_delay <عدد الدقائق>`")
         elif cmd == "!set_info_link":
-            if args: INFO_CHANNEL_LINK = args[0]; await message.channel.send("✅ تم")
+            if args:
+                INFO_CHANNEL_LINK = args[0]
+                await message.channel.send(f"🔗 رابط المعلومات تم تحديثه.")
+            else:
+                await message.channel.send("❗ استخدم `!set_info_link <الرابط الجديد>`")
 
         # --- عرض الإعدادات ---
         elif cmd == "!show_settings":
-            s = (f"تحرير+تبييض: {EDIT_WHITENING_OPEN}\n"
-                 f"ترجمة: {TRANSLATE_OPEN}\n"
-                 f"مدة التحرير: {EDIT_TEST_DURATION_SEC//3600}h\n"
-                 f"مدة التبييض: {WHITENING_TEST_DURATION_SEC//3600}h\n"
-                 f"مدة الترجمة: {TRANSLATE_TEST_DURATION_SEC//3600}h\n"
-                 f"تأخير الإغلاق: {CLOSED_TICKET_CLOSE_DELAY//60} دقيقة\n"
-                 f"رابط المعلومات: {INFO_CHANNEL_LINK}")
-            await message.channel.send(s)
+            embed = discord.Embed(title="⚙️ الإعدادات الحالية", color=0x3498db)
+            embed.add_field(name="تحرير + تبييض", value="مفتوح" if EDIT_WHITENING_OPEN else "مغلق", inline=True)
+            embed.add_field(name="ترجمة", value="مفتوح" if TRANSLATE_OPEN else "مغلق", inline=True)
+            embed.add_field(name="مدة التحرير", value=f"{EDIT_TEST_DURATION_SEC//3600} ساعة", inline=True)
+            embed.add_field(name="مدة التبييض", value=f"{WHITENING_TEST_DURATION_SEC//3600} ساعة", inline=True)
+            embed.add_field(name="مدة الترجمة", value=f"{TRANSLATE_TEST_DURATION_SEC//3600} ساعة", inline=True)
+            embed.add_field(name="تأخير إغلاق التكت المغلق", value=f"{CLOSED_TICKET_CLOSE_DELAY//60} دقيقة", inline=True)
+            embed.add_field(name="رابط المعلومات", value=INFO_CHANNEL_LINK, inline=False)
+            await message.channel.send(embed=embed)
 
         # --- إرسال رسالة مخصصة ---
         elif cmd == "!say":
@@ -496,43 +537,114 @@ async def process_control_command(message):
                 text = " ".join(args[1:])
                 ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
                 await human_send_smart(ch, text)
-                await message.channel.send("✅ تم الإرسال")
+                await message.channel.send(f"💬 تم الإرسال في <#{ch_id}>.")
+            else:
+                await message.channel.send("❗ استخدم `!say <معرف القناة> <النص>`")
 
         # --- أوامر عامة ---
         elif cmd == "!ping":
-            await message.channel.send("✅ السيلف بوت يعمل!")
+            await message.channel.send("🏓 البوت يعمل!")
         elif cmd == "!stats":
-            await message.channel.send(
-                f"📊 إحصائيات:\nمفتوحة: {stats['opened']}\nمغلقة: {stats['closed']}\nناجحة: {stats['success']}\nفاشلة: {stats['failed']}")
+            embed = discord.Embed(title="📈 إحصائيات", color=0x2ecc71)
+            embed.add_field(name="تكتات مفتوحة", value=stats['opened'])
+            embed.add_field(name="تكتات مغلقة", value=stats['closed'])
+            embed.add_field(name="ناجحة", value=stats['success'])
+            embed.add_field(name="فاشلة", value=stats['failed'])
+            await message.channel.send(embed=embed)
         elif cmd == "!close_all":
+            count = len(active_tests)
             for ch_id in list(active_tests.keys()):
                 ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
                 await close_ticket(ch)
-            await message.channel.send("✅ جارٍ إغلاق جميع التكتات")
+            await message.channel.send(f"🔒 جارٍ إغلاق {count} تكت.")
         elif cmd == "!reload":
             load_dotenv(override=True)
-            await message.channel.send("✅ تم إعادة تحميل .env (بعض المتغيرات تحتاج إعادة تشغيل)")
+            await message.channel.send("🔄 تم إعادة تحميل ملف البيئة.")
         elif cmd == "!shutdown":
-            await message.channel.send("🛑 جارٍ إيقاف السيلف بوت...")
+            await message.channel.send("🛑 جارٍ إيقاف التشغيل...")
             await bot.close()
 
-        # --- مساعدة ---
+        # --- مساعدة محسنة ---
         elif cmd == "!help":
-            help_txt = """**📜 الأوامر:**
-`!open_edit` `!close_edit` `!open_translate` `!close_translate`
-`!toggle_edit` `!toggle_translate`
-`!status` `!list_active`
-`!force_close <id>` `!force_fail <id>` `!force_next <id>`
-`!remind <id>`
-`!set_edit_time <ساعات>` `!set_whitening_time <ساعات>` `!set_translate_time <ساعات>`
-`!set_close_delay <دقائق>` `!set_info_link <رابط>`
-`!show_settings` `!ping` `!stats` `!say <id> <نص>` `!close_all` `!shutdown`"""
-            await message.channel.send(help_txt)
+            help_embed = discord.Embed(
+                title="📚 دليل الأوامر",
+                description="جميع الأوامر تبدأ بـ `!` وتستخدم في قناة التحكم المخصصة.",
+                color=0x9b59b6
+            )
+
+            # فئة التحكم بالتخصصات
+            help_embed.add_field(
+                name="🔧 التحكم بالتخصصات",
+                value=(
+                    "`!open_edit` – فتح تقديم تحرير + تبييض\n"
+                    "`!close_edit` – إغلاق تقديم تحرير + تبييض\n"
+                    "`!open_translate` – فتح تقديم الترجمة\n"
+                    "`!close_translate` – إغلاق تقديم الترجمة\n"
+                    "`!toggle_edit` – تبديل حالة تحرير + تبييض\n"
+                    "`!toggle_translate` – تبديل حالة الترجمة"
+                ),
+                inline=False
+            )
+
+            # فئة المراقبة
+            help_embed.add_field(
+                name="📋 المراقبة والمتابعة",
+                value=(
+                    "`!status` – عرض حالة التقديمات والتكتات\n"
+                    "`!list_active` – عرض التكتات النشطة\n"
+                    "`!stats` – إحصائيات عامة"
+                ),
+                inline=False
+            )
+
+            # فئة إدارة التكتات
+            help_embed.add_field(
+                name="🎫 إدارة التكتات",
+                value=(
+                    "`!force_close <id>` – إغلاق تكت محدد\n"
+                    "`!force_fail <id>` – إرسال فشل لتكت محدد\n"
+                    "`!force_next <id>` – نقل تكت مدمج لمرحلة التحرير\n"
+                    "`!remind <id>` – إرسال تذكير فوري\n"
+                    "`!close_all` – إغلاق جميع التكتات"
+                ),
+                inline=False
+            )
+
+            # فئة الإعدادات
+            help_embed.add_field(
+                name="⚙️ الإعدادات",
+                value=(
+                    "`!set_edit_time <ساعات>` – ضبط مدة التحرير\n"
+                    "`!set_whitening_time <ساعات>` – ضبط مدة التبييض\n"
+                    "`!set_translate_time <ساعات>` – ضبط مدة الترجمة\n"
+                    "`!set_close_delay <دقائق>` – ضبط تأخير إغلاق التكت المغلق\n"
+                    "`!set_info_link <رابط>` – تغيير رابط المعلومات\n"
+                    "`!show_settings` – عرض الإعدادات الحالية"
+                ),
+                inline=False
+            )
+
+            # فئة أوامر عامة
+            help_embed.add_field(
+                name="🛠️ عام",
+                value=(
+                    "`!ping` – اختبار الاتصال\n"
+                    "`!say <id> <نص>` – إرسال رسالة عبر الحساب\n"
+                    "`!reload` – إعادة تحميل متغيرات البيئة\n"
+                    "`!shutdown` – إيقاف البوت"
+                ),
+                inline=False
+            )
+
+            help_embed.set_footer(text="استخدم الأوامر في قناة التحكم المحددة فقط")
+            await message.channel.send(embed=help_embed)
+
         else:
-            await message.channel.send("❓ أمر غير معروف. استخدم !help")
+            await message.channel.send("❓ أمر غير معروف. استخدم `!help` لعرض الأوامر.")
 
     except Exception as e:
-        await message.channel.send(f"❌ خطأ: {e}")
+        await message.channel.send(f"❌ حدث خطأ: {e}")
+
 
 # ═══════════════════════════════════════
 # الأحداث الرئيسية (التلقائية)
