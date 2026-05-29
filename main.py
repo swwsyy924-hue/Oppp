@@ -376,8 +376,6 @@ async def start_edit_phase(channel, mention_str):
     )
     reminder_tasks[channel.id] = reminder_task
 
-# ... (كل ما سبق من import وإعدادات ودوال مساعدة يبقى كما هو دون تغيير)
-
 # ═══════════════════════════════════════
 # 🎮 معالجة أوامر التحكم عن بعد
 # ═══════════════════════════════════════
@@ -417,11 +415,13 @@ async def process_control_command(message):
             edit_icon = "🟢" if EDIT_WHITENING_OPEN else "🔴"
             trans_icon = "🟢" if TRANSLATE_OPEN else "🔴"
             active = len(active_tests)
-            embed = discord.Embed(title="📊 حالة النظام", color=0x00ff00 if active == 0 else 0xffaa00)
-            embed.add_field(name=f"{edit_icon} تحرير + تبييض", value="مفتوح" if EDIT_WHITENING_OPEN else "مغلق", inline=True)
-            embed.add_field(name=f"{trans_icon} ترجمة", value="مفتوح" if TRANSLATE_OPEN else "مغلق", inline=True)
-            embed.add_field(name="📁 تكتات نشطة", value=str(active), inline=False)
-            await message.channel.send(embed=embed)
+            txt = (
+                f"**📊 حالة النظام**\n"
+                f"{edit_icon} **تحرير + تبييض:** {'مفتوح' if EDIT_WHITENING_OPEN else 'مغلق'}\n"
+                f"{trans_icon} **ترجمة:** {'مفتوح' if TRANSLATE_OPEN else 'مغلق'}\n"
+                f"📁 **تكتات نشطة:** {active}"
+            )
+            await message.channel.send(txt)
 
         # --- عرض التكتات النشطة ---
         elif cmd == "!list_active":
@@ -520,15 +520,17 @@ async def process_control_command(message):
 
         # --- عرض الإعدادات ---
         elif cmd == "!show_settings":
-            embed = discord.Embed(title="⚙️ الإعدادات الحالية", color=0x3498db)
-            embed.add_field(name="تحرير + تبييض", value="مفتوح" if EDIT_WHITENING_OPEN else "مغلق", inline=True)
-            embed.add_field(name="ترجمة", value="مفتوح" if TRANSLATE_OPEN else "مغلق", inline=True)
-            embed.add_field(name="مدة التحرير", value=f"{EDIT_TEST_DURATION_SEC//3600} ساعة", inline=True)
-            embed.add_field(name="مدة التبييض", value=f"{WHITENING_TEST_DURATION_SEC//3600} ساعة", inline=True)
-            embed.add_field(name="مدة الترجمة", value=f"{TRANSLATE_TEST_DURATION_SEC//3600} ساعة", inline=True)
-            embed.add_field(name="تأخير إغلاق التكت المغلق", value=f"{CLOSED_TICKET_CLOSE_DELAY//60} دقيقة", inline=True)
-            embed.add_field(name="رابط المعلومات", value=INFO_CHANNEL_LINK, inline=False)
-            await message.channel.send(embed=embed)
+            txt = (
+                f"**⚙️ الإعدادات الحالية**\n"
+                f"**تحرير + تبييض:** {'مفتوح' if EDIT_WHITENING_OPEN else 'مغلق'}\n"
+                f"**ترجمة:** {'مفتوح' if TRANSLATE_OPEN else 'مغلق'}\n"
+                f"**مدة التحرير:** {EDIT_TEST_DURATION_SEC//3600} ساعة\n"
+                f"**مدة التبييض:** {WHITENING_TEST_DURATION_SEC//3600} ساعة\n"
+                f"**مدة الترجمة:** {TRANSLATE_TEST_DURATION_SEC//3600} ساعة\n"
+                f"**تأخير إغلاق التكت المغلق:** {CLOSED_TICKET_CLOSE_DELAY//60} دقيقة\n"
+                f"**رابط المعلومات:** {INFO_CHANNEL_LINK}"
+            )
+            await message.channel.send(txt)
 
         # --- إرسال رسالة مخصصة ---
         elif cmd == "!say":
@@ -545,12 +547,14 @@ async def process_control_command(message):
         elif cmd == "!ping":
             await message.channel.send("🏓 البوت يعمل!")
         elif cmd == "!stats":
-            embed = discord.Embed(title="📈 إحصائيات", color=0x2ecc71)
-            embed.add_field(name="تكتات مفتوحة", value=stats['opened'])
-            embed.add_field(name="تكتات مغلقة", value=stats['closed'])
-            embed.add_field(name="ناجحة", value=stats['success'])
-            embed.add_field(name="فاشلة", value=stats['failed'])
-            await message.channel.send(embed=embed)
+            txt = (
+                f"**📈 إحصائيات**\n"
+                f"تكتات مفتوحة: {stats['opened']}\n"
+                f"تكتات مغلقة: {stats['closed']}\n"
+                f"ناجحة: {stats['success']}\n"
+                f"فاشلة: {stats['failed']}"
+            )
+            await message.channel.send(txt)
         elif cmd == "!close_all":
             count = len(active_tests)
             for ch_id in list(active_tests.keys()):
@@ -564,80 +568,42 @@ async def process_control_command(message):
             await message.channel.send("🛑 جارٍ إيقاف التشغيل...")
             await bot.close()
 
-        # --- مساعدة محسنة ---
+        # --- مساعدة محسنة (بدون Embed) ---
         elif cmd == "!help":
-            help_embed = discord.Embed(
-                title="📚 دليل الأوامر",
-                description="جميع الأوامر تبدأ بـ `!` وتستخدم في قناة التحكم المخصصة.",
-                color=0x9b59b6
+            help_txt = (
+                "**📚 دليل الأوامر**\n"
+                "جميع الأوامر تبدأ بـ `!` وتستخدم في قناة التحكم المخصصة.\n\n"
+                "**🔧 التحكم بالتخصصات**\n"
+                "`!open_edit` – فتح تقديم تحرير + تبييض\n"
+                "`!close_edit` – إغلاق تقديم تحرير + تبييض\n"
+                "`!open_translate` – فتح تقديم الترجمة\n"
+                "`!close_translate` – إغلاق تقديم الترجمة\n"
+                "`!toggle_edit` – تبديل حالة تحرير + تبييض\n"
+                "`!toggle_translate` – تبديل حالة الترجمة\n\n"
+                "**📋 المراقبة والمتابعة**\n"
+                "`!status` – عرض حالة التقديمات والتكتات\n"
+                "`!list_active` – عرض التكتات النشطة\n"
+                "`!stats` – إحصائيات عامة\n\n"
+                "**🎫 إدارة التكتات**\n"
+                "`!force_close <id>` – إغلاق تكت محدد\n"
+                "`!force_fail <id>` – إرسال فشل لتكت محدد\n"
+                "`!force_next <id>` – نقل تكت مدمج لمرحلة التحرير\n"
+                "`!remind <id>` – إرسال تذكير فوري\n"
+                "`!close_all` – إغلاق جميع التكتات\n\n"
+                "**⚙️ الإعدادات**\n"
+                "`!set_edit_time <ساعات>` – ضبط مدة التحرير\n"
+                "`!set_whitening_time <ساعات>` – ضبط مدة التبييض\n"
+                "`!set_translate_time <ساعات>` – ضبط مدة الترجمة\n"
+                "`!set_close_delay <دقائق>` – ضبط تأخير إغلاق التكت المغلق\n"
+                "`!set_info_link <رابط>` – تغيير رابط المعلومات\n"
+                "`!show_settings` – عرض الإعدادات الحالية\n\n"
+                "**🛠️ عام**\n"
+                "`!ping` – اختبار الاتصال\n"
+                "`!say <id> <نص>` – إرسال رسالة عبر الحساب\n"
+                "`!reload` – إعادة تحميل متغيرات البيئة\n"
+                "`!shutdown` – إيقاف البوت"
             )
-
-            # فئة التحكم بالتخصصات
-            help_embed.add_field(
-                name="🔧 التحكم بالتخصصات",
-                value=(
-                    "`!open_edit` – فتح تقديم تحرير + تبييض\n"
-                    "`!close_edit` – إغلاق تقديم تحرير + تبييض\n"
-                    "`!open_translate` – فتح تقديم الترجمة\n"
-                    "`!close_translate` – إغلاق تقديم الترجمة\n"
-                    "`!toggle_edit` – تبديل حالة تحرير + تبييض\n"
-                    "`!toggle_translate` – تبديل حالة الترجمة"
-                ),
-                inline=False
-            )
-
-            # فئة المراقبة
-            help_embed.add_field(
-                name="📋 المراقبة والمتابعة",
-                value=(
-                    "`!status` – عرض حالة التقديمات والتكتات\n"
-                    "`!list_active` – عرض التكتات النشطة\n"
-                    "`!stats` – إحصائيات عامة"
-                ),
-                inline=False
-            )
-
-            # فئة إدارة التكتات
-            help_embed.add_field(
-                name="🎫 إدارة التكتات",
-                value=(
-                    "`!force_close <id>` – إغلاق تكت محدد\n"
-                    "`!force_fail <id>` – إرسال فشل لتكت محدد\n"
-                    "`!force_next <id>` – نقل تكت مدمج لمرحلة التحرير\n"
-                    "`!remind <id>` – إرسال تذكير فوري\n"
-                    "`!close_all` – إغلاق جميع التكتات"
-                ),
-                inline=False
-            )
-
-            # فئة الإعدادات
-            help_embed.add_field(
-                name="⚙️ الإعدادات",
-                value=(
-                    "`!set_edit_time <ساعات>` – ضبط مدة التحرير\n"
-                    "`!set_whitening_time <ساعات>` – ضبط مدة التبييض\n"
-                    "`!set_translate_time <ساعات>` – ضبط مدة الترجمة\n"
-                    "`!set_close_delay <دقائق>` – ضبط تأخير إغلاق التكت المغلق\n"
-                    "`!set_info_link <رابط>` – تغيير رابط المعلومات\n"
-                    "`!show_settings` – عرض الإعدادات الحالية"
-                ),
-                inline=False
-            )
-
-            # فئة أوامر عامة
-            help_embed.add_field(
-                name="🛠️ عام",
-                value=(
-                    "`!ping` – اختبار الاتصال\n"
-                    "`!say <id> <نص>` – إرسال رسالة عبر الحساب\n"
-                    "`!reload` – إعادة تحميل متغيرات البيئة\n"
-                    "`!shutdown` – إيقاف البوت"
-                ),
-                inline=False
-            )
-
-            help_embed.set_footer(text="استخدم الأوامر في قناة التحكم المحددة فقط")
-            await message.channel.send(embed=help_embed)
+            await message.channel.send(help_txt)
 
         else:
             await message.channel.send("❓ أمر غير معروف. استخدم `!help` لعرض الأوامر.")
