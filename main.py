@@ -38,8 +38,11 @@ CLOSED_TICKET_CLOSE_DELAY = 900  # 15 دقيقة
 # الرابط الثابت لشات المعلومات
 INFO_CHANNEL_LINK = "https://discord.com/channels/1202306392757915688/1202559461433286716"
 
-# إحصائيات حقيقية (متغيرة مع الأحداث)
-stats = {"opened": 0, "closed": 0, "success": 0, "failed": 0}
+# إحصائيات (عدادات حقيقية)
+# - opened: يتم حسابه مباشرة من عدد القنوات الموجودة في الفئة
+# - closed / failed: تزيد عند حذف أي قناة من الفئة
+# - success: عدد القنوات الحالية التي تحوي كلمة "ناجح" في اسمها
+stats = {"closed": 0, "failed": 0}
 
 # الرسائل حسب الكلمة
 FIRST_MSG_EDIT = "اسم اختبار تحرير"
@@ -181,7 +184,6 @@ async def monitor_test(channel, duration, applicant_id, applicant_mention):
             print(f"⏰ انتهى الوقت دون رابط في {channel.name} - إرسال رسالة الفشل")
             fail_text = FAIL_MSG.replace("{mention}", applicant_mention)
             await human_send_smart(channel, fail_text)
-            stats['failed'] += 1   # <-- فشل حقيقي
             await asyncio.sleep(3600)
             await close_ticket(channel)
             return
@@ -224,7 +226,7 @@ async def close_ticket(channel):
             for c in row.children:
                 if isinstance(c, discord.Button) and "تأكيد" in c.label:
                     await c.click()
-                    stats['closed'] += 1   # <-- إغلاق حقيقي
+                    # لا نزيد العداد هنا لأن حدث الحذف هو المسؤول
                     print(f"✅ تم الضغط على '{c.label}' وإغلاق الروم {channel.name}")
                     return
 
@@ -340,8 +342,6 @@ async def start_whitening_phase(channel, mention_str):
     active_tests[channel.id] = "combined"
     test_phase[channel.id] = "whitening"
     link_submitted.discard(channel.id)
-
-    stats['opened'] += 1   # <-- تكت مفتوح حقيقي
 
     task = asyncio.create_task(
         monitor_test(channel, WHITENING_TEST_DURATION_SEC, None, mention_str)
@@ -551,12 +551,23 @@ async def process_control_command(message):
         elif cmd == "!بينغ":
             await message.channel.send("🏓 البوت يعمل!")
         elif cmd == "!احصائيات":
+            # حساب مفتوحة = عدد القنوات النصية في الفئة الآن
+            category = bot.get_channel(CATEGORY_ID)
+            if category:
+                all_channels = category.channels
+                opened = sum(1 for ch in all_channels if isinstance(ch, discord.TextChannel))
+                success = sum(1 for ch in all_channels if isinstance(ch, discord.TextChannel) and "ناجح" in ch.name)
+            else:
+                opened = 0
+                success = 0
+            failed = stats['failed']
+            closed = stats['closed']
             txt = (
                 f"**📈 إحصائيات**\n"
-                f"تكتات مفتوحة: {stats['opened']}\n"
-                f"تكتات مغلقة: {stats['closed']}\n"
-                f"ناجحة: {stats['success']}\n"
-                f"فاشلة: {stats['failed']}"
+                f"تكتات مفتوحة: {opened}\n"
+                f"ناجحة: {success}\n"
+                f"مغلقة: {closed}\n"
+                f"فاشلة: {failed}"
             )
             await message.channel.send(txt)
         elif cmd == "!اغلاق_الكل":
@@ -587,7 +598,7 @@ async def process_control_command(message):
                 "**📋 المراقبة والمتابعة**\n"
                 "`!الحالة` – عرض حالة التقديمات والتكتات\n"
                 "`!التكتات` – عرض التكتات النشطة\n"
-                "`!احصائيات` – إحصائيات عامة\n\n"
+                "`!احصائيات` – إحصائيات عامة (مفتوحة/ناجحة/مغلقة/فاشلة)\n\n"
                 "**🎫 إدارة التكتات**\n"
                 "`!اغلاق_تكت <id>` – إغلاق تكت محدد\n"
                 "`!فشل_تكت <id>` – إرسال فشل لتكت محدد\n"
@@ -642,6 +653,13 @@ async def on_guild_channel_create(channel):
 
     pending_channels.add(channel.id)
     print(f"🆕 قناة جديدة مراقبة: {channel.name} (ID: {channel.id})")
+
+@bot.event
+async def on_guild_channel_delete(channel):
+    """عند حذف أي قناة من الفئة، نزيد العدادين مغلقة وفاشلة"""
+    if channel.category_id == CATEGORY_ID and isinstance(channel, discord.TextChannel):
+        stats['closed'] += 1
+        stats['failed'] += 1
 
 @bot.event
 async def on_message(message):
@@ -759,7 +777,6 @@ async def on_message(message):
             await human_send_smart(channel, third_msg)
 
             active_tests[channel.id] = test_type
-            stats['opened'] += 1   # <-- تكت ترجمة مفتوح
 
             task = asyncio.create_task(
                 monitor_test(channel, TRANSLATE_TEST_DURATION_SEC, app_user.id, applicant_mention)
@@ -803,7 +820,6 @@ async def on_message(message):
                 extracted = extract_link(message, r'https?://drive\.google\.com/[^\s]+')
                 if extracted and message.channel.id not in link_submitted:
                     link_submitted.add(message.channel.id)
-                    stats['success'] += 1   # <-- نجاح مرحلة
                     if message.channel.id in close_tasks:
                         close_tasks[message.channel.id].cancel()
                     if message.channel.id in reminder_tasks:
@@ -817,7 +833,6 @@ async def on_message(message):
                 extracted = extract_link(message, r'https?://drive\.google\.com/[^\s]+')
                 if extracted and message.channel.id not in link_submitted:
                     link_submitted.add(message.channel.id)
-                    stats['success'] += 1   # <-- نجاح مرحلة
                     if message.channel.id in close_tasks:
                         close_tasks[message.channel.id].cancel()
                     if message.channel.id in reminder_tasks:
@@ -831,7 +846,6 @@ async def on_message(message):
             extracted = extract_link(message, r'https?://docs\.google\.com/[^\s]+')
             if extracted and message.channel.id not in link_submitted:
                 link_submitted.add(message.channel.id)
-                stats['success'] += 1   # <-- نجاح ترجمة
                 if message.channel.id in close_tasks:
                     close_tasks[message.channel.id].cancel()
                 if message.channel.id in reminder_tasks:
