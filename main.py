@@ -23,19 +23,16 @@ from auto_handlers import (
     start_edit_phase,
 )
 
-# استيراد معالج أوامر التحكم
-from control_panel import process_control_command
-
 # إعداد proxy إن وجد
 proxy = None
 if PROXY_URL:
     proxy = PROXY_URL
 
+# ═══════════════════════════════════════
+# السيلف بوت (الحساب الأساسي)
+# ═══════════════════════════════════════
 bot = commands.Bot(command_prefix="!", self_bot=True, proxy=proxy)
 
-# ═══════════════════════════════════════
-# الأحداث الرئيسية (التلقائية)
-# ═══════════════════════════════════════
 @bot.event
 async def on_ready():
     print(f"✅ Self-bot يعمل باسم: {bot.user.name} (ID: {bot.user.id})")
@@ -70,11 +67,6 @@ async def on_guild_channel_delete(channel):
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
-        return
-
-    # ===== قناة التحكم =====
-    if message.channel.id == CONTROL_CHANNEL_ID and message.author.id == OWNER_ID:
-        await process_control_command(message, bot)  # تم تمرير bot
         return
 
     # ===== التعامل مع القنوات المنتظرة لأول رسالة (إيمبد البداية) =====
@@ -164,14 +156,14 @@ async def on_message(message):
             print(f"🚫 تم إرسال رسالة الإغلاق في {channel.name}")
 
             close_task = asyncio.create_task(
-                auto_close_closed_ticket(bot, channel, CLOSED_TICKET_CLOSE_DELAY)  # تم تمرير bot
+                auto_close_closed_ticket(bot, channel, CLOSED_TICKET_CLOSE_DELAY)
             )
             close_tasks[channel.id] = close_task
             return
 
         # ---- التقديم مفتوح ----
         if is_combined:
-            await start_whitening_phase(bot, channel, applicant_mention)  # تم تمرير bot
+            await start_whitening_phase(bot, channel, applicant_mention)
         else:
             # اختبار ترجمة مستقل
             third_msg = third_msg_template.replace("{mention}", applicant_mention)
@@ -185,11 +177,11 @@ async def on_message(message):
             active_tests[channel.id] = test_type
 
             task = asyncio.create_task(
-                monitor_test(bot, channel, TRANSLATE_TEST_DURATION_SEC, app_user.id, applicant_mention)  # تم تمرير bot
+                monitor_test(bot, channel, TRANSLATE_TEST_DURATION_SEC, app_user.id, applicant_mention)
             )
             close_tasks[channel.id] = task
             reminder_task = asyncio.create_task(
-                periodic_reminder(bot, channel.id, applicant_mention, TRANSLATE_TEST_DURATION_SEC)  # تم تمرير bot
+                periodic_reminder(bot, channel.id, applicant_mention, TRANSLATE_TEST_DURATION_SEC)
             )
             reminder_tasks[channel.id] = reminder_task
 
@@ -218,7 +210,7 @@ async def on_message(message):
                     close_tasks[message.channel.id].cancel()
                 if message.channel.id in reminder_tasks:
                     reminder_tasks[message.channel.id].cancel()
-                await start_edit_phase(bot, message.channel, applicant["mention"])  # تم تمرير bot
+                await start_edit_phase(bot, message.channel, applicant["mention"])
                 return
 
             # رابط درايف - تبييض (يغطي الرابط بمفرده أو مع نص)
@@ -263,8 +255,17 @@ async def on_message(message):
 async def on_command_error(ctx, error):
     print(f"⚠️ خطأ: {error}")
 
+# ═══════════════════════════════════════
+# تشغيل العميلين معاً
+# ═══════════════════════════════════════
 if __name__ == "__main__":
-    if not TOKEN:
-        print("❌ التوكن غير موجود! ضع DISCORD_TOKEN في ملف .env")
+    from real_bot import bot_client
+    if not TOKEN or not BOT_TOKEN:
+        print("❌ التوكنات غير موجودة!")
     else:
-        bot.run(TOKEN)
+        async def run_both():
+            await asyncio.gather(
+                bot.start(TOKEN),
+                bot_client.start(BOT_TOKEN)
+            )
+        asyncio.run(run_both())
