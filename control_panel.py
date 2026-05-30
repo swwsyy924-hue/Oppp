@@ -7,7 +7,7 @@ from state import *
 from utils import human_send_smart
 from auto_handlers import close_ticket, start_edit_phase
 
-async def process_control_command(message, bot):
+async def process_control_command(message, self_bot):
     global EDIT_WHITENING_OPEN, TRANSLATE_OPEN, EDIT_TEST_DURATION_SEC, TRANSLATE_TEST_DURATION_SEC
     global WHITENING_TEST_DURATION_SEC, CLOSED_TICKET_CLOSE_DELAY, INFO_CHANNEL_LINK
     global stats
@@ -73,8 +73,8 @@ async def process_control_command(message, bot):
         elif cmd == "!اغلاق_تكت":
             if args:
                 ch_id = int(args[0])
-                ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
-                await close_ticket(bot, ch)
+                ch = self_bot.get_channel(ch_id) or await self_bot.fetch_channel(ch_id)
+                await close_ticket(self_bot, ch)
                 await message.channel.send(f"🗑️ جارٍ إغلاق تكت {ch.name}.")
             else:
                 await message.channel.send("❗ استخدم `!اغلاق_تكت <معرف القناة>`")
@@ -83,7 +83,7 @@ async def process_control_command(message, bot):
         elif cmd == "!فشل_تكت":
             if args:
                 ch_id = int(args[0])
-                ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
+                ch = self_bot.get_channel(ch_id) or await self_bot.fetch_channel(ch_id)
                 mention = applicant_info.get(ch_id, {}).get("mention", "")
                 await human_send_smart(ch, FAIL_MSG.replace("{mention}", mention))
                 await message.channel.send(f"⛔ تم إرسال إشعار الفشل لتكت {ch.name}.")
@@ -96,8 +96,8 @@ async def process_control_command(message, bot):
                 ch_id = int(args[0])
                 if test_phase.get(ch_id) == "whitening":
                     mention = applicant_info.get(ch_id, {}).get("mention", "")
-                    ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
-                    await start_edit_phase(bot, ch, mention)
+                    ch = self_bot.get_channel(ch_id) or await self_bot.fetch_channel(ch_id)
+                    await start_edit_phase(self_bot, ch, mention)
                     await message.channel.send(f"⏭️ تم نقل تكت {ch.name} إلى مرحلة التحرير.")
                 else:
                     await message.channel.send("❌ التكت ليس في مرحلة التبييض.")
@@ -109,7 +109,7 @@ async def process_control_command(message, bot):
             if args:
                 ch_id = int(args[0])
                 mention = applicant_info.get(ch_id, {}).get("mention", "")
-                ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
+                ch = self_bot.get_channel(ch_id) or await self_bot.fetch_channel(ch_id)
                 await human_send_smart(ch, f"# تذكير {mention}\n\nيرجى تسليم الاختبار قبل انتهاء الوقت.")
                 await message.channel.send(f"🔔 تم إرسال تذكير في تكت {ch.name}.")
             else:
@@ -166,7 +166,7 @@ async def process_control_command(message, bot):
             if len(args) >= 2:
                 ch_id = int(args[0])
                 text = " ".join(args[1:])
-                ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
+                ch = self_bot.get_channel(ch_id) or await self_bot.fetch_channel(ch_id)
                 await human_send_smart(ch, text)
                 await message.channel.send(f"💬 تم الإرسال في <#{ch_id}>.")
             else:
@@ -176,7 +176,7 @@ async def process_control_command(message, bot):
         elif cmd == "!بينغ":
             await message.channel.send("🏓 البوت يعمل!")
         elif cmd == "!احصائيات":
-            category = bot.get_channel(CATEGORY_ID)
+            category = self_bot.get_channel(CATEGORY_ID)
             if category:
                 all_channels = category.channels
                 opened = sum(1 for ch in all_channels if isinstance(ch, discord.TextChannel))
@@ -197,21 +197,21 @@ async def process_control_command(message, bot):
         elif cmd == "!اغلاق_الكل":
             count = len(active_tests)
             for ch_id in list(active_tests.keys()):
-                ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
-                await close_ticket(bot, ch)
+                ch = self_bot.get_channel(ch_id) or await self_bot.fetch_channel(ch_id)
+                await close_ticket(self_bot, ch)
             await message.channel.send(f"🔒 جارٍ إغلاق {count} تكت.")
         elif cmd == "!اعادة_تحميل":
             load_dotenv(override=True)
             await message.channel.send("🔄 تم إعادة تحميل ملف البيئة.")
         elif cmd == "!ايقاف":
             await message.channel.send("🛑 جارٍ إيقاف التشغيل...")
-            await bot.close()
+            await self_bot.close()
 
         # ── مساعدة بالعربية ──
         elif cmd == "!مساعدة":
             help_txt = (
                 "**📚 دليل الأوامر**\n"
-                "جميع الأوامر تبدأ بـ `!` وتستخدم في قناة التحكم المخصصة.\n\n"
+                "جميع الأوامر تبدأ بـ `!` وتستخدم مع البوت.\n\n"
                 "**🔧 التحكم بالتخصصات**\n"
                 "`!فتح_دمج` – فتح تقديم تحرير + تبييض\n"
                 "`!اغلاق_دمج` – إغلاق تقديم تحرير + تبييض\n"
