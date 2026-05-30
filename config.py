@@ -4,10 +4,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ────────────── المفاتيح السرية ──────────────
-TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN = os.getenv("DISCORD_TOKEN")         # توكن السيلف-بوت (الحساب)
+BOT_TOKEN = os.getenv("BOT_TOKEN")         # توكن البوت الحقيقي الجديد
 CATEGORY_ID = int(os.getenv("CATEGORY_ID"))
 OWNER_ID = int(os.getenv("OWNER_ID"))
-CONTROL_CHANNEL_ID = int(os.getenv("CONTROL_CHANNEL_ID"))
 PROXY_URL = os.getenv("PROXY_URL")
 
 # إعدادات ثانوية
