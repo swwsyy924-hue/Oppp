@@ -74,7 +74,7 @@ async def on_message(message):
 
     # ===== قناة التحكم =====
     if message.channel.id == CONTROL_CHANNEL_ID and message.author.id == OWNER_ID:
-        await process_control_command(message, bot)  # نمرر bot لاستخدامه داخل الدالة
+        await process_control_command(message, bot)  # تم تمرير bot
         return
 
     # ===== التعامل مع القنوات المنتظرة لأول رسالة (إيمبد البداية) =====
@@ -164,14 +164,14 @@ async def on_message(message):
             print(f"🚫 تم إرسال رسالة الإغلاق في {channel.name}")
 
             close_task = asyncio.create_task(
-                auto_close_closed_ticket(channel, CLOSED_TICKET_CLOSE_DELAY)
+                auto_close_closed_ticket(bot, channel, CLOSED_TICKET_CLOSE_DELAY)  # تم تمرير bot
             )
             close_tasks[channel.id] = close_task
             return
 
         # ---- التقديم مفتوح ----
         if is_combined:
-            await start_whitening_phase(channel, applicant_mention)
+            await start_whitening_phase(bot, channel, applicant_mention)  # تم تمرير bot
         else:
             # اختبار ترجمة مستقل
             third_msg = third_msg_template.replace("{mention}", applicant_mention)
@@ -185,11 +185,11 @@ async def on_message(message):
             active_tests[channel.id] = test_type
 
             task = asyncio.create_task(
-                monitor_test(channel, TRANSLATE_TEST_DURATION_SEC, app_user.id, applicant_mention)
+                monitor_test(bot, channel, TRANSLATE_TEST_DURATION_SEC, app_user.id, applicant_mention)  # تم تمرير bot
             )
             close_tasks[channel.id] = task
             reminder_task = asyncio.create_task(
-                periodic_reminder(channel.id, applicant_mention, TRANSLATE_TEST_DURATION_SEC)
+                periodic_reminder(bot, channel.id, applicant_mention, TRANSLATE_TEST_DURATION_SEC)  # تم تمرير bot
             )
             reminder_tasks[channel.id] = reminder_task
 
@@ -218,7 +218,7 @@ async def on_message(message):
                     close_tasks[message.channel.id].cancel()
                 if message.channel.id in reminder_tasks:
                     reminder_tasks[message.channel.id].cancel()
-                await start_edit_phase(message.channel, applicant["mention"])
+                await start_edit_phase(bot, message.channel, applicant["mention"])  # تم تمرير bot
                 return
 
             # رابط درايف - تبييض (يغطي الرابط بمفرده أو مع نص)
