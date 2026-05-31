@@ -3,6 +3,7 @@ from discord.ext import commands
 import asyncio
 import random
 import re
+import config
 
 # استيراد الإعدادات والثوابت
 from config import *
