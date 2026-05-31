@@ -9,6 +9,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")         # توكن البوت الحقيقي 
 CATEGORY_ID = int(os.getenv("CATEGORY_ID"))
 OWNER_ID = int(os.getenv("OWNER_ID"))
 PROXY_URL = os.getenv("PROXY_URL")
+CONTROL_CHANNEL_ID = int(os.getenv("CONTROL_CHANNEL_ID", "0"))
 
 # إعدادات ثانوية
 DELAY_MIN = float(os.getenv("DELAY_MIN", "1"))
