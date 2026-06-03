@@ -1,7 +1,7 @@
 import discord
 import asyncio
 import random
-from config import *
+import config
 from state import *
 from utils import human_send_smart, get_typing_duration, extract_link
 
@@ -27,7 +27,7 @@ async def monitor_test(bot, channel, duration, applicant_id, applicant_mention):
 
         if channel.id not in link_submitted:
             print(f"⏰ انتهى الوقت دون رابط في {channel.name} - إرسال رسالة الفشل")
-            fail_text = FAIL_MSG.replace("{mention}", applicant_mention)
+            fail_text = config.FAIL_MSG.replace("{mention}", applicant_mention)
             await human_send_smart(channel, fail_text)
             await asyncio.sleep(3600)
             await close_ticket(bot, channel)
@@ -161,63 +161,35 @@ async def auto_close_closed_ticket(bot, channel, delay):
     except Exception as e:
         print(f"❌ فشل إغلاق التكت المغلق {channel.name}: {e}")
 
-async def start_whitening_phase(bot, channel, mention_str):
-    """تبدأ مرحلة التبييض في المسار المدمج"""
-    first_msg = FIRST_MSG_WHITENING
-    second_msg = SECOND_MSG_WHITENING
-    third_msg = THIRD_MSG_WHITENING.replace("{mention}", mention_str)
+async def start_combined_test(bot, channel, mention_str):
+    """تبدأ الاختبار المدمج (تحرير + تبييض) كمرحلة واحدة"""
+    first_msg = config.FIRST_MSG_COMBINED
+    second_msg = config.SECOND_MSG_COMBINED
+    third_msg = config.THIRD_MSG_COMBINED.replace("{mention}", mention_str)
 
     await asyncio.sleep(random.uniform(1.0, 2.0))
 
     await human_send_smart(channel, first_msg)
-    print(f"📨 [تبييض] [{channel.guild.name}] تم الإرسال الأول في {channel.name}")
+    print(f"📨 [تحرير+تبييض] [{channel.guild.name}] تم الإرسال الأول في {channel.name}")
 
     await asyncio.sleep(1)
 
     await human_send_smart(channel, second_msg)
-    print(f"📨2 [تبييض] [{channel.guild.name}] تم الإرسال الثاني في {channel.name}")
+    print(f"📨2 [تحرير+تبييض] [{channel.guild.name}] تم الإرسال الثاني في {channel.name}")
 
     await asyncio.sleep(2)
 
     await human_send_smart(channel, third_msg)
-    print(f"📨3 [تبييض] [{channel.guild.name}] تم الإرسال الثالث في {channel.name}")
+    print(f"📨3 [تحرير+تبييض] [{channel.guild.name}] تم الإرسال الثالث في {channel.name}")
 
     active_tests[channel.id] = "combined"
-    test_phase[channel.id] = "whitening"
     link_submitted.discard(channel.id)
 
     task = asyncio.create_task(
-        monitor_test(bot, channel, WHITENING_TEST_DURATION_SEC, None, mention_str)
+        monitor_test(bot, channel, config.COMBINED_TEST_DURATION_SEC, None, mention_str)
     )
     close_tasks[channel.id] = task
     reminder_task = asyncio.create_task(
-        periodic_reminder(bot, channel.id, mention_str, WHITENING_TEST_DURATION_SEC)
-    )
-    reminder_tasks[channel.id] = reminder_task
-
-async def start_edit_phase(bot, channel, mention_str):
-    """تبدأ مرحلة التحرير بعد الأمر مباشرة (بدون اسم)"""
-    second_msg = SECOND_MSG_EDIT
-    third_msg = THIRD_MSG_EDIT.replace("{mention}", mention_str)
-
-    await asyncio.sleep(1.5)
-
-    await human_send_smart(channel, second_msg)
-    print(f"📨2 [تحرير] [{channel.guild.name}] تم الإرسال الثاني في {channel.name}")
-
-    await asyncio.sleep(2)
-
-    await human_send_smart(channel, third_msg)
-    print(f"📨3 [تحرير] [{channel.guild.name}] تم الإرسال الثالث في {channel.name}")
-
-    test_phase[channel.id] = "edit"
-    link_submitted.discard(channel.id)
-
-    task = asyncio.create_task(
-        monitor_test(bot, channel, EDIT_TEST_DURATION_SEC, None, mention_str)
-    )
-    close_tasks[channel.id] = task
-    reminder_task = asyncio.create_task(
-        periodic_reminder(bot, channel.id, mention_str, EDIT_TEST_DURATION_SEC)
+        periodic_reminder(bot, channel.id, mention_str, config.COMBINED_TEST_DURATION_SEC)
     )
     reminder_tasks[channel.id] = reminder_task
