@@ -16,8 +16,8 @@ DELAY_MIN = float(os.getenv("DELAY_MIN", "1"))
 DELAY_MAX = float(os.getenv("DELAY_MAX", "3"))
 
 # ────────────── أوضاع التقديم ──────────────
-EDIT_WHITENING_OPEN = False   # المسار المدمج (تحرير + تبييض)
-TRANSLATE_OPEN = False        # الترجمة (مستقلة)
+EDIT_WHITENING_OPEN = True   # المسار المدمج (تحرير + تبييض)
+TRANSLATE_OPEN = True         # الترجمة (مستقلة)
 
 # ────────────── مدد الاختبارات ──────────────
 EDIT_TEST_DURATION_SEC = 4 * 3600       # 4 ساعات (مرحلة التحرير)
