@@ -9,9 +9,6 @@ applicant_info = {}        # channel_id -> {"id": int, "mention": str}
 applicant_spoke = set()    # قنوات أرسل فيها المقدم رسالة واحدة على الأقل
 link_submitted = set()     # قنوات أرسل فيها المقدم رابط الاختبار (للمرحلة الحالية)
 
-# قاموس لتخزين المرحلة الحالية للمسار المدمج
-test_phase = {}            # channel_id -> "whitening" أو "edit"
-
 # قاموس لتخزين مهام الإغلاق التلقائي
 close_tasks = {}
 
