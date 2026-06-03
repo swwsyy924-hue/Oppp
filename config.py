@@ -3,52 +3,30 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ────────────── المفاتيح السرية ──────────────
-TOKEN = os.getenv("DISCORD_TOKEN")         # توكن السيلف-بوت (الحساب)
-BOT_TOKEN = os.getenv("BOT_TOKEN")         # توكن البوت الحقيقي الجديد
+TOKEN = os.getenv("DISCORD_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 CATEGORY_ID = int(os.getenv("CATEGORY_ID"))
 OWNER_ID = int(os.getenv("OWNER_ID"))
 PROXY_URL = os.getenv("PROXY_URL")
 CONTROL_CHANNEL_ID = int(os.getenv("CONTROL_CHANNEL_ID", "0"))
 
-# إعدادات ثانوية
 DELAY_MIN = float(os.getenv("DELAY_MIN", "1"))
 DELAY_MAX = float(os.getenv("DELAY_MAX", "3"))
 
-# ────────────── أوضاع التقديم ──────────────
-EDIT_WHITENING_OPEN = True   # المسار المدمج (تحرير + تبييض)
-TRANSLATE_OPEN = True         # الترجمة (مستقلة)
+EDIT_WHITENING_OPEN = True
+TRANSLATE_OPEN = True
 
-# ────────────── مدد الاختبارات ──────────────
-EDIT_TEST_DURATION_SEC = 4 * 3600       # 4 ساعات (مرحلة التحرير)
-TRANSLATE_TEST_DURATION_SEC = 2 * 3600  # ساعتان (الترجمة)
-WHITENING_TEST_DURATION_SEC = 3 * 3600  # 3 ساعات (مرحلة التبييض)
+COMBINED_TEST_DURATION_SEC = 7 * 3600
+TRANSLATE_TEST_DURATION_SEC = 2 * 3600
+CLOSED_TICKET_CLOSE_DELAY = 900
 
-# ────────────── مدة الإغلاق التلقائي ──────────────
-CLOSED_TICKET_CLOSE_DELAY = 900  # 15 دقيقة
-
-# ────────────── رابط المعلومات ──────────────
 INFO_CHANNEL_LINK = "https://discord.com/channels/1202306392757915688/1202559461433286716"
-
-# ────────────── الرسائل النصية ──────────────
-FIRST_MSG_EDIT = "اسم اختبار تحرير"
-SECOND_MSG_EDIT = "اختبار تحرير"
 
 FIRST_MSG_TRANS = "اسم اختبار ترجمة"
 SECOND_MSG_TRANS = "اختبار ترجمة"
 
-FIRST_MSG_WHITENING = "اسم اختبار تحرير + تبييض"
-SECOND_MSG_WHITENING = "اختبار تبييض"
-
-THIRD_MSG_EDIT = (
-    "# شكراً لتقديمك يا {mention}\n\n"
-    "**اختبارك يبدأ من هذه اللحظة**\n\n"
-    "> أمامك **4 ساعات** فقط لإنهاء الاختبار كاملاً\n\n"
-    "- يرجى قراءة التعليمات جيداً قبل البدء\n"
-    "- التسليم عبر رابط **Google Drive** فقط\n\n"
-    "**بالتوفيق!**\n\n"
-    "-# ملاحظة: أي سؤال أو استفسار بخصوص الاختبار اسأل في التكت وانتظرني أو انتظر قدوم الإدارة"
-)
+FIRST_MSG_COMBINED = "اسم اختبار تحرير + تبييض"
+SECOND_MSG_COMBINED = "اختبار تحرير"
 
 THIRD_MSG_TRANS = (
     "# شكراً لتقديمك يا {mention}\n\n"
@@ -60,13 +38,15 @@ THIRD_MSG_TRANS = (
     "-# ملاحظة: أي سؤال أو استفسار بخصوص الاختبار اسأل في التكت وانتظرني أو انتظر قدوم الإدارة"
 )
 
-THIRD_MSG_WHITENING = (
+THIRD_MSG_COMBINED = (
     "# شكراً لتقديمك يا {mention}\n\n"
     "**اختبارك يبدأ من هذه اللحظة**\n\n"
-    "> أمامك **3 ساعات** فقط لإنهاء اختبار التبييض كاملاً\n\n"
+    "> أمامك **7 ساعات** فقط لإنهاء الاختبار كاملاً\n\n"
     "- يرجى قراءة التعليمات جيداً قبل البدء\n"
-    "- صور الاختبار **4**، قم بعمل **2** منهم فقط\n"
-    "- التسليم عبر رابط **Google Drive** فقط\n\n"
+    "- صور الاختبار **4**، قم بعمل **2** منهم فقط (تبييض)\n"
+    "- التسليم عبر رابط **Google Drive** واحد يحتوي على:\n"
+    "   - ملف التبييض\n"
+    "   - ملف التحرير\n\n"
     "**بالتوفيق!**\n\n"
     "-# ملاحظة: أي سؤال أو استفسار بخصوص الاختبار اسأل في التكت وانتظرني أو انتظر قدوم الإدارة"
 )
