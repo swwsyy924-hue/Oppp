@@ -15,7 +15,6 @@ from auto_handlers import (
     start_combined_test,
 )
 
-# إعداد proxy إن وجد
 proxy = None
 if config.PROXY_URL:
     proxy = config.PROXY_URL
@@ -51,7 +50,6 @@ async def on_guild_channel_create(channel):
 
 @bot.event
 async def on_guild_channel_delete(channel):
-    """عند حذف أي قناة من الفئة، نزيد العدادين مغلقة وفاشلة"""
     if channel.category_id == config.CATEGORY_ID and isinstance(channel, discord.TextChannel):
         stats['closed'] += 1
         stats['failed'] += 1
@@ -59,6 +57,12 @@ async def on_guild_channel_delete(channel):
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
+        return
+
+    # ===== قناة التحكم (عودة الحساب للتحكم) =====
+    if message.channel.id == config.CONTROL_CHANNEL_ID and message.author.id == config.OWNER_ID:
+        from control_panel import process_control_command
+        await process_control_command(message, bot)
         return
 
     # ===== التعامل مع القنوات المنتظرة لأول رسالة (إيمبد البداية) =====
@@ -188,9 +192,8 @@ async def on_message(message):
         test_type = active_tests[message.channel.id]
         content = message.content
 
-        # --- المسار المدمج (مرحلة واحدة) ---
+        # --- المسار المدمج ---
         if test_type == "combined":
-            # رابط درايف واحد يفي بالغرض (تحرير + تبييض)
             extracted = extract_link(message, r'https?://drive\.google\.com/[^\s]+')
             if extracted and message.channel.id not in link_submitted:
                 link_submitted.add(message.channel.id)
@@ -219,13 +222,7 @@ async def on_command_error(ctx, error):
     print(f"⚠️ خطأ: {error}")
 
 if __name__ == "__main__":
-    from real_bot import bot_client
-    if not config.TOKEN or not config.BOT_TOKEN:
-        print("❌ التوكنات غير موجودة!")
+    if not config.TOKEN:
+        print("❌ التوكن غير موجود! ضع DISCORD_TOKEN في ملف .env")
     else:
-        async def run_both():
-            await asyncio.gather(
-                bot.start(config.TOKEN),
-                bot_client.start(config.BOT_TOKEN)
-            )
-        asyncio.run(run_both())
+        bot.run(config.TOKEN)
