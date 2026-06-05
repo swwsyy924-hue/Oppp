@@ -201,7 +201,7 @@ async def on_message(message):
                     close_tasks[message.channel.id].cancel()
                 if message.channel.id in reminder_tasks:
                     reminder_tasks[message.channel.id].cancel()
-                await message.channel.send("<@1334530342899421287>")
+                await message.channel.send("<@1334530342899421287> ، <@1119935890496696422> ، <@1202583085330333736>")
                 print(f"🔔 [تحرير+تبييض] تم منشن المشرف في {message.channel.name}")
                 return
 
